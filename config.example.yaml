@@ -1,0 +1,44 @@
+# =========================================
+# 台鐵自動訂票設定檔 — 範例
+# 複製此檔為 config.yaml 並填入你的資料
+# =========================================
+
+booking:
+  id_number: "A123456789"        # 身分證字號
+  departure_station: "台北"       # 出發站（填中文站名，例如：台北、新竹、台中）
+  arrival_station: "台中"         # 抵達站
+  date: "2026/06/01"             # 乘車日期，格式：YYYY/MM/DD
+  train_number: "139"            # 車次號碼
+  ticket_count: 1                # 一般座票數
+
+  # 座位偏好：no_preference（不指定）| window_seat（桌型座優先）
+  seat_preference: "no_preference"
+
+  # 是否接受同班車換座
+  accept_seat_exchange: true
+
+automation:
+  headless: false          # false = 看得到瀏覽器（建議調試時用 false）
+  retry_interval: 3        # 刷票失敗後的等待秒數
+  max_retries: 200         # 最大重試次數
+  slow_mo: 300             # 每個操作之間的延遲毫秒（0 = 最快）
+
+  # true = 使用你電腦上安裝的真實 Chrome（避免 reCAPTCHA v3 驗證碼）
+  # false = 使用 Playwright 內建 Chromium（可能觸發驗證碼）
+  use_real_chrome: true
+
+  # 【強烈建議填寫】指定真實 Chrome 使用者資料目錄，讓 reCAPTCHA v3 直接信任你的帳號。
+  # 填寫後幾乎不會再出現驗證碼。
+  # 注意：執行本工具前必須先完全關閉 Chrome（含背景執行）。
+  #
+  # Windows 預設路徑範例：
+  #   chrome_profile_path: "C:\\Users\\你的使用者名稱\\AppData\\Local\\Google\\Chrome\\User Data"
+  # macOS 預設路徑範例：
+  #   chrome_profile_path: "/Users/你的使用者名稱/Library/Application Support/Google/Chrome"
+  #
+  # 留空 = 使用專案目錄下的 .chrome_profile/（全新空白 profile，初次執行仍可能出現驗證碼）
+  chrome_profile_path: ""
+
+  # true = 執行前自動強制關閉所有 Chrome 視窗（使用 chrome_profile_path 時建議開啟）
+  # false = 不自動關閉，若 Chrome 仍在執行則會出錯並提示手動關閉
+  kill_chrome_on_start: false
