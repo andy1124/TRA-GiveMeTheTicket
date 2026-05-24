@@ -461,13 +461,23 @@ async def check_result(page: Page) -> str:
 
 async def click_reset(page: Page) -> None:
     logger.info("Clicking reset...")
-    reset_btn = page.get_by_text(RESET_BTN_TEXT, exact=False).first
-    await reset_btn.click()
-    await page.wait_for_load_state("domcontentloaded", timeout=10000)
     try:
-        await page.wait_for_load_state("networkidle", timeout=8000)
-    except PlaywrightTimeout:
-        pass  # networkidle 超時不是致命錯誤，繼續執行
+        reset_btn = page.get_by_text(RESET_BTN_TEXT, exact=False).first
+        await reset_btn.wait_for(state="visible", timeout=5000)
+        await reset_btn.click()
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except PlaywrightTimeout:
+            pass  # networkidle 超時不是致命錯誤，繼續執行
+    except (PlaywrightTimeout, PlaywrightError) as e:
+        # 找不到重設按鈕（頁面處於未知狀態），直接導回訂票頁
+        logger.warning(f"  Reset button not found ({e.__class__.__name__}), navigating back to booking page...")
+        await page.goto(BOOKING_FORM_URL, wait_until="domcontentloaded")
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except PlaywrightTimeout:
+            pass
     await asyncio.sleep(0.5)
 
 
@@ -587,6 +597,8 @@ async def run_booking(cfg: BookingConfig) -> bool:
                         logger.warning(
                             f"  Captcha fail — retrying ({cap_retry}/{MAX_CAPTCHA_RETRIES})..."
                         )
+                        # 連續失敗後稍作等待，避免觸發伺服器 throttling
+                        await asyncio.sleep(1.5)
                         # force=True：強制刷新圖片並重新辨識
                         await _handle_captcha(page, force=True)
                         await submit_booking(page)
