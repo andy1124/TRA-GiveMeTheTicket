@@ -42,3 +42,23 @@ automation:
   # true = 執行前自動強制關閉所有 Chrome 視窗（使用 chrome_profile_path 時建議開啟）
   # false = 不自動關閉，若 Chrome 仍在執行則會出錯並提示手動關閉
   kill_chrome_on_start: false
+
+  # ── 驗證碼蒐集模式（Phase 1：訓練資料蒐集）─────────────────────
+  #
+  # collect_captcha: true 時，每次 ddddocr 預測後會依訂票結果分類存圖：
+  #
+  #   captcha_dataset/
+  #   ├── labeled/    ← 伺服器接受（captcha 答對）→ 可直接用於模型訓練
+  #   │               │  檔名格式：{預測文字}_{timestamp}.png
+  #   │               │  例：aB3kL9_1716876543.png（檔名即正確 label）
+  #   ├── errors/     ← 伺服器拒絕（captcha 答錯）→ 需人工重新標記
+  #   │               │  檔名格式：{timestamp}_{ddddocr猜測}.png
+  #   └── uncertain/  ← 結果不明（unknown）
+  #
+  # 也可以用 CLI 旗標臨時開啟，不需修改 config.yaml：
+  #   python main.py --collect-captcha
+  #
+  collect_captcha: false
+
+  # 蒐集資料的存放根目錄（相對於專案根目錄）
+  captcha_dataset_dir: "captcha_dataset"

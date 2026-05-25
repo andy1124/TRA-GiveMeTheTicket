@@ -60,6 +60,9 @@ class BookingConfig:
     use_real_chrome: bool
     chrome_profile_path: str = ""    # empty = use default .chrome_profile/
     kill_chrome_on_start: bool = True
+    # ── 驗證碼蒐集模式 ──────────────────────────────────────────────
+    collect_captcha: bool = False          # True = 每次 ddddocr 預測後存圖
+    captcha_dataset_dir: str = "captcha_dataset"  # 蒐集根目錄（相對於專案根目錄）
 
 
 # ===================================================================
@@ -132,6 +135,84 @@ async def _select_station(page: Page, field_id: str, station: str) -> None:
         await asyncio.sleep(0.3)
     except Exception as e:
         logger.warning(f"  Station selection failed ({station}): {e}")
+
+
+# ── 驗證碼蒐集：紀錄上一次 ddddocr 的截圖與預測，供結果回傳後分類存檔 ──
+# 使用 dict 而非物件，方便在 async 函式間傳遞（不需要 thread-safe，單執行緒）
+_last_captcha_attempt: dict = {}
+# keys:
+#   "img_bytes"  : bytes  — 截圖原始資料
+#   "predicted"  : str    — ddddocr 輸出（空字串表示 OCR 失敗或手動輸入）
+#   "is_auto"    : bool   — True = ddddocr 自動，False = 手動輸入（不存檔）
+
+# 蒐集統計（整個執行期間累計）
+_collect_stats: dict = {"labeled": 0, "errors": 0, "uncertain": 0}
+
+
+def _safe_filename(text: str) -> str:
+    """將字串中 Windows/Unix 不合法的檔名字元替換為 '_'。"""
+    import re
+    return re.sub(r'[\\/:*?"<>|\s]', '_', text)
+
+
+def _save_captcha_sample(result: str, cfg: "BookingConfig") -> None:
+    """
+    依訂票結果將上一次 ddddocr 的截圖分類存檔。
+
+    分類邏輯：
+      success / fail  → captcha 被伺服器接受 → labeled/（可直接用於訓練）
+      captcha_fail    → captcha 答錯          → errors/ （需人工修正）
+      unknown / other → 無法判斷              → uncertain/
+
+    檔名規則：
+      labeled/   {predicted}_{timestamp}.png   ← 預測即正解，filename 就是 label
+      errors/    {timestamp}_{predicted}.png   ← 錯誤樣本，預測僅供參考
+      uncertain/ {timestamp}_{predicted}.png
+    """
+    if not cfg.collect_captcha:
+        return
+
+    attempt = _last_captcha_attempt
+    if not attempt:
+        return
+
+    img_bytes: bytes = attempt.get("img_bytes", b"")
+    predicted: str   = attempt.get("predicted", "")
+    is_auto: bool    = attempt.get("is_auto", False)
+
+    # 只蒐集 ddddocr 自動預測（手動輸入答案的不算，因為 label 是人打的不是 OCR）
+    if not is_auto or not img_bytes or not predicted:
+        _last_captcha_attempt.clear()
+        return
+
+    ts = int(time.time())
+    dataset_root = Path(__file__).parent / cfg.captcha_dataset_dir
+
+    if result in ("success", "fail"):
+        # captcha 被伺服器接受 → 預測正確
+        save_dir  = dataset_root / "labeled"
+        filename  = f"{_safe_filename(predicted)}_{ts}.png"
+        stat_key  = "labeled"
+    elif result == "captcha_fail":
+        # 伺服器拒絕 → 預測錯誤（留著 ddddocr 的猜測以便人工比對）
+        save_dir  = dataset_root / "errors"
+        filename  = f"{ts}_{_safe_filename(predicted)}.png"
+        stat_key  = "errors"
+    else:
+        save_dir  = dataset_root / "uncertain"
+        filename  = f"{ts}_{_safe_filename(predicted)}.png"
+        stat_key  = "uncertain"
+
+    save_dir.mkdir(parents=True, exist_ok=True)
+    (save_dir / filename).write_bytes(img_bytes)
+    _collect_stats[stat_key] += 1
+    logger.info(
+        f"  [collect] {stat_key:9s} ← {filename}  "
+        f"(total labeled={_collect_stats['labeled']} "
+        f"errors={_collect_stats['errors']} "
+        f"uncertain={_collect_stats['uncertain']})"
+    )
+    _last_captcha_attempt.clear()
 
 
 # ── ddddocr singleton（懶載入，避免每次重試都重新載入模型）──────────
@@ -244,10 +325,11 @@ def _is_valid_captcha(text: str) -> bool:
     return True
 
 
-async def _handle_captcha(page: Page, force: bool = False) -> None:
+async def _handle_captcha(page: Page, cfg: "BookingConfig | None" = None, force: bool = False) -> None:
     """
     自動辨識驗證碼（ddddocr），失敗則退回手動輸入。
     force=True：即使欄位已有值也重新辨識（驗證碼錯誤後使用）。
+    cfg：傳入可啟用蒐集模式，ddddocr 結果不合規則時也會存入 errors/。
     """
     captcha_input = page.locator("#verifyCode")
     try:
@@ -291,6 +373,11 @@ async def _handle_captcha(page: Page, force: bool = False) -> None:
                     await captcha_input.fill("")
                     await captcha_input.fill(result)
                     logger.info(f"  [captcha] 自動填入: {result}")
+                    # 記錄此次截圖與預測，供送出後 _save_captcha_sample 分類存檔
+                    _last_captcha_attempt.clear()
+                    _last_captcha_attempt["img_bytes"] = img_bytes
+                    _last_captcha_attempt["predicted"] = result
+                    _last_captcha_attempt["is_auto"] = True
                     return
                 else:
                     reason = "空字串" if not result else (
@@ -301,6 +388,20 @@ async def _handle_captcha(page: Page, force: bool = False) -> None:
                         f"  [captcha] 結果 {result!r} 不合規則（{reason}）"
                         f"（attempt {ocr_attempt}/{OCR_RETRIES}），刷新圖片重試..."
                     )
+                    # 格式不合規則 = ddddocr 預測失敗，直接存入 errors/（不需等伺服器驗證）
+                    if cfg and cfg.collect_captcha and img_bytes and result:
+                        ts = int(time.time())
+                        save_dir = Path(__file__).parent / cfg.captcha_dataset_dir / "errors"
+                        save_dir.mkdir(parents=True, exist_ok=True)
+                        filename = f"{ts}_{_safe_filename(result)}.png"
+                        (save_dir / filename).write_bytes(img_bytes)
+                        _collect_stats["errors"] += 1
+                        logger.info(
+                            f"  [collect] errors     ← {filename}  (invalid format: {reason})"
+                            f"  (total labeled={_collect_stats['labeled']} "
+                            f"errors={_collect_stats['errors']} "
+                            f"uncertain={_collect_stats['uncertain']})"
+                        )
                     await _refresh_captcha_image(page)
                     await asyncio.sleep(0.6)
             except Exception as e:
@@ -415,7 +516,7 @@ async def fill_booking_form(page: Page, cfg: BookingConfig) -> None:
     elif not cfg.accept_seat_exchange and is_checked:
         await chg.uncheck()
 
-    await _handle_captcha(page)
+    await _handle_captcha(page, cfg)
     logger.info("Form filled.")
 
 
@@ -577,6 +678,7 @@ async def run_booking(cfg: BookingConfig) -> bool:
                 logger.info(f"\n-- Attempt {attempt} --")
                 await submit_booking(page)
                 result = await check_result(page)
+                _save_captcha_sample(result, cfg)
 
                 if result == "success":
                     logger.info("Done! Remember to pay within the deadline.")
@@ -600,9 +702,10 @@ async def run_booking(cfg: BookingConfig) -> bool:
                         # 連續失敗後稍作等待，避免觸發伺服器 throttling
                         await asyncio.sleep(1.5)
                         # force=True：強制刷新圖片並重新辨識
-                        await _handle_captcha(page, force=True)
+                        await _handle_captcha(page, cfg, force=True)
                         await submit_booking(page)
                         result = await check_result(page)
+                        _save_captcha_sample(result, cfg)
 
                         if result == "success":
                             logger.info("Done! Remember to pay within the deadline.")
@@ -641,7 +744,7 @@ async def run_booking(cfg: BookingConfig) -> bool:
                         await fill_booking_form(page, cfg)
                     else:
                         logger.info(f"表單資料保留（{pid_val[:3]}*******），僅處理驗證碼")
-                        await _handle_captcha(page)
+                        await _handle_captcha(page, cfg)
                     logger.info("Form ready, retrying...")
 
             logger.warning(f"Max retries ({cfg.max_retries}) reached.")

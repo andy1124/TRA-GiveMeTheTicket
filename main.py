@@ -1,9 +1,10 @@
 """
 台鐵自動訂票 — 主程式入口
 用法：
-    python main.py                  # 使用預設 config.yaml
-    python main.py --config my.yaml # 指定設定檔
-    python main.py --inspect        # 只開啟瀏覽器到訂票頁面（用於檢查 selector）
+    python main.py                      # 使用預設 config.yaml
+    python main.py --config my.yaml     # 指定設定檔
+    python main.py --inspect            # 只開啟瀏覽器到訂票頁面（用於檢查 selector）
+    python main.py --collect-captcha    # 開啟驗證碼蒐集模式（覆蓋 config.yaml 設定）
 """
 
 import argparse
@@ -43,21 +44,23 @@ def load_config(config_path: str) -> BookingConfig:
     a = raw.get("automation", {})
 
     return BookingConfig(
-        id_number          = b["id_number"],
-        departure_station  = b["departure_station"],
-        arrival_station    = b["arrival_station"],
-        date               = b["date"],
-        train_number       = str(b["train_number"]),
-        ticket_count       = int(b.get("ticket_count", 1)),
-        seat_preference    = b.get("seat_preference", "no_preference"),
+        id_number            = b["id_number"],
+        departure_station    = b["departure_station"],
+        arrival_station      = b["arrival_station"],
+        date                 = b["date"],
+        train_number         = str(b["train_number"]),
+        ticket_count         = int(b.get("ticket_count", 1)),
+        seat_preference      = b.get("seat_preference", "no_preference"),
         accept_seat_exchange = bool(b.get("accept_seat_exchange", True)),
-        headless           = bool(a.get("headless", False)),
-        retry_interval     = float(a.get("retry_interval", 3)),
-        max_retries        = int(a.get("max_retries", 200)),
-        slow_mo            = int(a.get("slow_mo", 300)),
+        headless             = bool(a.get("headless", False)),
+        retry_interval       = float(a.get("retry_interval", 3)),
+        max_retries          = int(a.get("max_retries", 200)),
+        slow_mo              = int(a.get("slow_mo", 300)),
         use_real_chrome      = bool(a.get("use_real_chrome", True)),
         chrome_profile_path  = str(a.get("chrome_profile_path", "") or ""),
         kill_chrome_on_start = bool(a.get("kill_chrome_on_start", True)),
+        collect_captcha      = bool(a.get("collect_captcha", False)),
+        captcha_dataset_dir  = str(a.get("captcha_dataset_dir", "captcha_dataset")),
     )
 
 
@@ -102,6 +105,11 @@ def main():
         "--inspect", action="store_true",
         help="只開啟瀏覽器到訂票頁面（用於檢查 selector，不執行訂票）"
     )
+    parser.add_argument(
+        "--collect-captcha", action="store_true", default=None,
+        dest="collect_captcha",
+        help="開啟驗證碼蒐集模式：每次 ddddocr 預測後，依結果自動存圖至 captcha_dataset/"
+    )
     args = parser.parse_args()
 
     if args.inspect:
@@ -109,6 +117,10 @@ def main():
         return
 
     cfg = load_config(args.config)
+
+    # CLI --collect-captcha 旗標可覆蓋 config.yaml 中的設定
+    if args.collect_captcha is not None:
+        cfg.collect_captcha = args.collect_captcha
 
     logger.info("=" * 50)
     logger.info("  台鐵自動訂票工具 TRA-GiveMeTheTicket")
@@ -121,6 +133,10 @@ def main():
         logger.info(f"  Chrome  ：使用指定 profile → {cfg.chrome_profile_path}")
     else:
         logger.info("  Chrome  ：使用專案 .chrome_profile/（建議設定 chrome_profile_path）")
+    if cfg.collect_captcha:
+        logger.info(f"  [collect] 蒐集模式：ON  → 存至 {cfg.captcha_dataset_dir}/")
+        logger.info("     labeled/  = 伺服器接受（可直接訓練）")
+        logger.info("     errors/   = 伺服器拒絕（需人工重新標記）")
     logger.info("=" * 50)
     logger.info("▶  開始執行，按 Ctrl+C 可隨時中止\n")
 
