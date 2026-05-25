@@ -8,6 +8,7 @@ venv/
 
 # ── 個人設定（含身分證等敏感資料，絕對不能上傳）──
 config.yaml
+config copy.yaml
 
 # ── Chrome Profile（含登入 Cookie 等隱私資料）─────
 .chrome_profile/
@@ -19,3 +20,6 @@ config.yaml
 # ── OS ────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Other ───────────────────────────────────────────
+CAPTCHA_TRAINING_PLAN.md

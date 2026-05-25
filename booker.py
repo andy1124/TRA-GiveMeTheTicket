@@ -627,11 +627,21 @@ async def run_booking(cfg: BookingConfig) -> bool:
                     logger.info(f"Waiting {cfg.retry_interval}s...")
                     await asyncio.sleep(cfg.retry_interval)
                     await click_reset(page)
-                    # 重設後台鐵網站會保留表單資料，不需要重新填表
-                    # 等表單就緒後直接進入下一輪 submit
+                    # 等表單就緒
                     await page.wait_for_selector("input[type='submit'].btn-3d",
                                                   state="visible", timeout=15000)
-                    await _handle_captcha(page)   # 驗證碼重設後可能再次出現
+                    # 用身分證欄位快速判斷表單資料是否還在
+                    pid_val = ""
+                    try:
+                        pid_val = (await page.locator("#pid").input_value()).strip()
+                    except Exception:
+                        pass
+                    if not pid_val:
+                        logger.info("表單資料已消失，重新填寫...")
+                        await fill_booking_form(page, cfg)
+                    else:
+                        logger.info(f"表單資料保留（{pid_val[:3]}*******），僅處理驗證碼")
+                        await _handle_captcha(page)
                     logger.info("Form ready, retrying...")
 
             logger.warning(f"Max retries ({cfg.max_retries}) reached.")
