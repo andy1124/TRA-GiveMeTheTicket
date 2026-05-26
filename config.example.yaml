@@ -11,8 +11,13 @@ booking:
   train_number: "139"            # 車次號碼
   ticket_count: 1                # 一般座票數
 
-  # 座位偏好：no_preference（不指定）| window_seat（桌型座優先）
-  seat_preference: "no_preference"
+  # 座位偏好（完整訂票頁 tip123 支援全部 4 種選項）：
+  #   "none"        → 不指定（預設）
+  #   "window"      → 靠窗
+  #   "aisle"       → 靠走道
+  #   "table"       → 桌型座優先
+  #   （舊值 "no_preference" / "window_seat" 仍可用，自動對應）
+  seat_preference: "window"
 
   # 是否接受同班車換座
   accept_seat_exchange: true

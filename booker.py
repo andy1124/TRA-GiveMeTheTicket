@@ -8,6 +8,7 @@ reCAPTCHA v3 scores improve as the profile accumulates cookies and history.
 
 import asyncio
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -24,19 +25,44 @@ from playwright.async_api import (
 
 logger = logging.getLogger(__name__)
 
-BOOKING_FORM_URL    = "https://www.railway.gov.tw/tra-tip-web/tip/tip001/tip121/query"
+BOOKING_FORM_URL    = "https://www.railway.gov.tw/tra-tip-web/tip/tip001/tip123/query"
 SUCCESS_MARKER      = "訂票成功"
 FAIL_MARKER_SEAT    = "00089"
 FAIL_MARKER_NONE    = "均無符合條件車次"
+FAIL_MARKER_NO_SEAT = "均沒有空位"          # 新版失敗頁（2026-05 更新）
+FAIL_MARKER_NO_SEAT2 = "目前查無可售座位"   # 新版失敗頁（2026-05 更新）
 FAIL_MARKER_CAPTCHA = "驗證碼驗證失敗"
+TRAIN_LIST_MARKER   = "目前可預訂的車次"    # queryTrain 頁面：顯示可選班次
 RESET_BTN_TEXT      = "返回，重設訂票條件"
 MAX_CAPTCHA_RETRIES = 15   # 單次送出最多重試幾次驗證碼
+
+# 完整訂票頁（tip123）座位偏好 radio value 對應表
+# DOM 確認（2026-05）：
+#   #seatPref1 value="NONE"   label="不指定"
+#   #seatPref2 value="WINDOW" label="靠窗"
+#   #seatPref3 value="AISLE"  label="靠走道"
+#   #seatPref4 value="TABLE"  label="桌型座優先"
+# seat_preference 可用值：
+#   "none" / "window" / "aisle" / "table"
+#   （舊值 "window_seat" / "no_preference" 仍可使用，自動對應）
+SEAT_PREF_VALUES: dict[str, str] = {
+    "none":          "NONE",
+    "window":        "WINDOW",
+    "aisle":         "AISLE",
+    "table":         "TABLE",
+    # backward compat
+    "window_seat":   "WINDOW",
+    "no_preference": "NONE",
+}
 
 RESULT_JS = (
     "document.body.innerText.includes('訂票成功') || "
     "document.body.innerText.includes('00089') || "
     "document.body.innerText.includes('均無符合條件車次') || "
-    "document.body.innerText.includes('驗證碼驗證失敗')"
+    "document.body.innerText.includes('均沒有空位') || "
+    "document.body.innerText.includes('目前查無可售座位') || "
+    "document.body.innerText.includes('驗證碼驗證失敗') || "
+    "document.body.innerText.includes('目前可預訂的車次')"   # 列車清單頁
 )
 
 # Persistent profile dir lives next to this script
@@ -105,8 +131,11 @@ async def _select_station(page: Page, field_id: str, station: str) -> None:
     await asyncio.sleep(0.7)
 
     try:
-        item = page.locator(
-            f"ul.ui-autocomplete li.ui-menu-item:has-text('{station}')"
+        # 用 regex 精確比對結尾，避免「新竹」誤選「北新竹」
+        # 台鐵下拉選單格式為「代碼-站名」，比對「-站名$」或「^站名$」
+        exact_pattern = re.compile(rf'(^|-){re.escape(station)}$')
+        item = page.locator("ul.ui-autocomplete li.ui-menu-item").filter(
+            has_text=exact_pattern
         ).first
         await item.wait_for(state="visible", timeout=3000)
         await item.click()
@@ -124,7 +153,7 @@ async def _select_station(page: Page, field_id: str, station: str) -> None:
     await inp.press("Escape")
     await asyncio.sleep(0.2)
     icon_buttons = page.locator("button.icon.icon-list")
-    btn_index = 0 if field_id == "startStation" else 1
+    btn_index = 0 if "start" in field_id else 1
     try:
         await icon_buttons.nth(btn_index).click()
         await asyncio.sleep(0.4)
@@ -435,10 +464,10 @@ async def fill_booking_form(page: Page, cfg: BookingConfig) -> None:
 
     # --- Stations ---
     logger.info(f"Departure: {cfg.departure_station}")
-    await _select_station(page, "startStation", cfg.departure_station)
+    await _select_station(page, "startStation1", cfg.departure_station)
 
     logger.info(f"Arrival: {cfg.arrival_station}")
-    await _select_station(page, "endStation", cfg.arrival_station)
+    await _select_station(page, "endStation1", cfg.arrival_station)
 
     # --- Trip type ---
     trip_radio = page.locator("input[name='tripType'][value='ONEWAY']")
@@ -459,7 +488,7 @@ async def fill_booking_form(page: Page, cfg: BookingConfig) -> None:
 
     # --- Ticket count ---
     if cfg.ticket_count != 1:
-        current_qty = int(await page.locator("#normalQty").input_value())
+        current_qty = int(await page.locator("#normalQty1").input_value())
         if current_qty != cfg.ticket_count:
             logger.info(f"Setting ticket count: {cfg.ticket_count}")
             diff = cfg.ticket_count - current_qty
@@ -494,22 +523,24 @@ async def fill_booking_form(page: Page, cfg: BookingConfig) -> None:
     else:
         logger.info(f"Train: {cfg.train_number} (already set, skip)")
 
-    # --- Seat preference ---
-    if cfg.seat_preference == "window_seat":
-        if not await page.locator("#seatPref2").is_checked():
-            logger.info("Seat: table preferred")
-            await page.locator("#seatPref2").check()
-        else:
-            logger.info("Seat: table preferred (already set, skip)")
+    # --- Seat preference（tip123 DOM 確認：radio value = NONE/WINDOW/AISLE/TABLE）---
+    # 注意：radio 本身 pointer-events:none + position:absolute，
+    #       .check() 無效，必須點對應的 <label> 才能切換選項。
+    seat_value = SEAT_PREF_VALUES.get(cfg.seat_preference, "NONE")
+    logger.info(f"Seat preference: {cfg.seat_preference!r} → value='{seat_value}'")
+    seat_radio = page.locator(
+        f"input[name='ticketOrderParamList[0].seatPref'][value='{seat_value}']"
+    ).first
+    if not await seat_radio.is_checked():
+        radio_id = await seat_radio.get_attribute("id")
+        seat_label_el = page.locator(f"label[for='{radio_id}']").first
+        await seat_label_el.click()
+        logger.info(f"  Seat pref label clicked: #{radio_id} ({seat_value})")
     else:
-        if not await page.locator("#seatPref1").is_checked():
-            logger.info("Seat: no preference")
-            await page.locator("#seatPref1").check()
-        else:
-            logger.info("Seat: no preference (already set, skip)")
+        logger.info(f"  Seat pref already set: {seat_value} (skip)")
 
-    # --- Seat exchange ---
-    chg = page.locator("#chgSeat1")
+    # --- Seat exchange（tip123 DOM 確認：#pref1，舊頁為 #chgSeat1）---
+    chg = page.locator("#pref1")
     is_checked = await chg.is_checked()
     if cfg.accept_seat_exchange and not is_checked:
         await chg.check()
@@ -553,24 +584,144 @@ async def check_result(page: Page) -> str:
     if FAIL_MARKER_CAPTCHA in content:
         logger.warning("CAPTCHA verification failed")
         return "captcha_fail"
-    if FAIL_MARKER_SEAT in content or FAIL_MARKER_NONE in content:
+    if (FAIL_MARKER_SEAT in content or FAIL_MARKER_NONE in content
+            or FAIL_MARKER_NO_SEAT in content or FAIL_MARKER_NO_SEAT2 in content):
         logger.info("FAIL: no seats or no matching train")
         return "fail"
+    if TRAIN_LIST_MARKER in content:
+        logger.info("TRAIN LIST page detected — need to select train and proceed")
+        return "train_list"
     logger.warning("UNKNOWN result - check browser")
     return "unknown"
 
 
+async def select_first_train_and_next(page: Page) -> None:
+    """
+    在 queryTrain 列車清單頁面，選取第一可用班次（右側 radio），
+    點擊「下一步：選擇票種」後等待 tip115 訂票確認頁面載入。
+    （2026-05 新版流程：form submit → queryTrain → select → tip115 訂票成功）
+    """
+    logger.info("  [train list] 選擇第一可用班次...")
+
+    # 點選第一個 radio button（「選擇」欄）
+    # queryTrain 頁面的 radio 通常是 input[type='radio'] 或帶特定 class
+    radio_selectors = [
+        "td input[type='radio']",      # 表格列內的 radio（最具體）
+        "input[type='radio']",         # 頁面上任意 radio（fallback）
+    ]
+    radio_clicked = False
+    for sel in radio_selectors:
+        try:
+            radio = page.locator(sel).first
+            if await radio.is_visible(timeout=2000):
+                await radio.click(force=True)
+                logger.info(f"  [train list] Radio 已點選（selector: {sel}）")
+                radio_clicked = True
+                break
+            # radio 不可見時嘗試點 label（TRA 常見：radio hidden + label clickable）
+            rid = await radio.get_attribute("id")
+            if rid:
+                lbl = page.locator(f"label[for='{rid}']").first
+                if await lbl.is_visible(timeout=1000):
+                    await lbl.click()
+                    logger.info(f"  [train list] Radio label 已點選（id={rid}）")
+                    radio_clicked = True
+                    break
+        except Exception as e:
+            logger.debug(f"  [train list] Radio selector {sel!r} failed: {e}")
+            continue
+
+    if not radio_clicked:
+        logger.warning("  [train list] 無法點選 radio，嘗試直接點擊「選擇」欄格")
+        try:
+            # 點表格最後一欄的第一行（視覺上的○按鈕）
+            await page.locator("table tr:nth-child(2) td:last-child").first.click(force=True)
+        except Exception as e:
+            logger.warning(f"  [train list] 點擊「選擇」欄格失敗: {e}")
+
+    await asyncio.sleep(0.5)
+
+    # 點擊「下一步：選擇票種」按鈕（右下角）
+    next_btn_selectors = [
+        "button:has-text('下一步：選擇票種')",
+        "a:has-text('下一步：選擇票種')",
+        "button:has-text('下一步')",
+        "a.btn:has-text('下一步')",
+    ]
+    next_clicked = False
+    for sel in next_btn_selectors:
+        try:
+            btn = page.locator(sel).last   # 用 .last 確保是頁面底部的按鈕
+            if await btn.is_visible(timeout=2000):
+                await btn.click()
+                logger.info(f"  [train list] 「下一步」按鈕已點選（selector: {sel}）")
+                next_clicked = True
+                break
+        except Exception as e:
+            logger.debug(f"  [train list] Next btn selector {sel!r} failed: {e}")
+            continue
+
+    if not next_clicked:
+        logger.warning("  [train list] 找不到「下一步」按鈕，嘗試 get_by_role...")
+        try:
+            btn = page.get_by_role("button", name=re.compile(r"下一步")).last
+            await btn.click()
+            next_clicked = True
+        except Exception as e:
+            logger.error(f"  [train list] 所有「下一步」嘗試均失敗: {e}")
+
+    # 等待 tip115 訂票確認頁面或訂票成功訊息
+    logger.info("  [train list] 等待訂票確認頁面...")
+    try:
+        await page.wait_for_function(
+            "document.body.innerText.includes('訂票成功') || "
+            "document.body.innerText.includes('票種') || "
+            "document.body.innerText.includes('付款')",
+            timeout=20000,
+        )
+        logger.info("  [train list] 訂票確認頁面已載入")
+    except PlaywrightTimeout:
+        logger.warning("  [train list] 等待確認頁超時，繼續執行...")
+
+
 async def click_reset(page: Page) -> None:
     logger.info("Clicking reset...")
+    # 以多種 selector 嘗試找「返回，重設訂票條件」按鈕（新舊版頁面通用）
+    reset_selectors = [
+        "button:has-text('返回，重設訂票條件')",
+        "a:has-text('返回，重設訂票條件')",
+        "input[value*='返回']",
+        "button:has-text('重設訂票條件')",
+        "a:has-text('重設訂票條件')",
+    ]
+    for sel in reset_selectors:
+        try:
+            btn = page.locator(sel).first
+            if await btn.is_visible(timeout=2000):
+                await btn.click()
+                logger.info(f"  Reset button clicked（selector: {sel}）")
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8000)
+                except PlaywrightTimeout:
+                    pass
+                await asyncio.sleep(0.5)
+                return
+        except Exception as e:
+            logger.debug(f"  Reset selector {sel!r} failed: {e}")
+            continue
+
+    # get_by_text fallback（原始邏輯）
     try:
         reset_btn = page.get_by_text(RESET_BTN_TEXT, exact=False).first
-        await reset_btn.wait_for(state="visible", timeout=5000)
+        await reset_btn.wait_for(state="visible", timeout=3000)
         await reset_btn.click()
+        logger.info("  Reset button clicked（get_by_text）")
         await page.wait_for_load_state("domcontentloaded", timeout=10000)
         try:
             await page.wait_for_load_state("networkidle", timeout=8000)
         except PlaywrightTimeout:
-            pass  # networkidle 超時不是致命錯誤，繼續執行
+            pass
     except (PlaywrightTimeout, PlaywrightError) as e:
         # 找不到重設按鈕（頁面處於未知狀態），直接導回訂票頁
         logger.warning(f"  Reset button not found ({e.__class__.__name__}), navigating back to booking page...")
@@ -685,6 +836,20 @@ async def run_booking(cfg: BookingConfig) -> bool:
                     input("\nPress Enter to close browser...")
                     return True
 
+                # ── 新版流程：列車清單頁 → 選車 → 進入訂票確認頁 ───────────
+                if result == "train_list":
+                    await select_first_train_and_next(page)
+                    result = await check_result(page)
+                    _save_captcha_sample(result, cfg)
+                    if result == "success":
+                        logger.info("Done! Remember to pay within the deadline.")
+                        input("\nPress Enter to close browser...")
+                        return True
+                    if result == "unknown":
+                        logger.warning("Cannot determine result after train selection. Check browser...")
+                        input()
+                        break
+
                 if result == "unknown":
                     logger.warning("Cannot determine result. Check browser, press Enter...")
                     input()
@@ -711,6 +876,17 @@ async def run_booking(cfg: BookingConfig) -> bool:
                             logger.info("Done! Remember to pay within the deadline.")
                             input("\nPress Enter to close browser...")
                             return True
+
+                        # 驗證碼通過後出現列車清單 → 繼續選車流程
+                        if result == "train_list":
+                            await select_first_train_and_next(page)
+                            result = await check_result(page)
+                            _save_captcha_sample(result, cfg)
+                            if result == "success":
+                                logger.info("Done! Remember to pay within the deadline.")
+                                input("\nPress Enter to close browser...")
+                                return True
+                            break  # 非成功則跳出內層走正常流程
 
                         if result != "captcha_fail":
                             # 非驗證碼問題（fail / unknown），跳出內層迴圈走正常流程
