@@ -3,7 +3,8 @@ booking_runner.py — 背景訂票任務管理
 負責：
   - 以 asyncio.Task 管理 run_booking 的生命週期
   - 提供 start() / stop() 介面供 server.py 呼叫
-  - 維護全域狀態（idle / running / success / failed）
+  - 維護全域狀態機（idle / waiting / running / success / failed）
+  - 支援 scheduled_time：等待期間每秒更新倒數計時
   - 收集 WebSocket 廣播函式（由 server.py 注入）
 """
 
@@ -27,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 # ── 全域狀態 ─────────────────────────────────────────────────────────
 _current_task: asyncio.Task | None = None
-_state: str = "idle"          # idle | running | success | failed
+_state: str = "idle"          # idle | waiting | running | success | failed
+_countdown_secs: int = 0       # 排程倒數剩餘秒數（waiting 狀態時有效）
+_retry_count: int = 0          # 目前重試次數（running 狀態時有效）
+_last_attempt: str = ""        # 上次嘗試時間（ISO 格式字串）
 
 # 廣播函式：由 server.py 在啟動時注入
 _broadcast_fn: Callable[[str], Awaitable[None]] | None = None
@@ -39,7 +43,12 @@ def set_broadcast(fn: Callable[[str], Awaitable[None]]) -> None:
 
 
 def get_state() -> dict:
-    return {"state": _state}
+    return {
+        "state": _state,
+        "countdown_secs": _countdown_secs,
+        "retry_count": _retry_count,
+        "last_attempt": _last_attempt,
+    }
 
 
 # ── WebSocket Log Handler ────────────────────────────────────────────
@@ -66,13 +75,49 @@ ws_log_handler.setFormatter(
 )
 
 
+# ── 重試計數鉤子 ─────────────────────────────────────────────────────
+def _on_retry(count: int) -> None:
+    """由 run_booking 每次重試時回呼，更新 _retry_count 與 _last_attempt。"""
+    global _retry_count, _last_attempt
+    _retry_count = count
+    _last_attempt = datetime.now().strftime("%H:%M:%S")
+
+
 # ── 內部執行函式 ─────────────────────────────────────────────────────
-async def _run(cfg: BookingConfig) -> None:
-    global _state
+async def _run(cfg: BookingConfig, scheduled_time: datetime | None = None) -> None:
+    global _state, _countdown_secs, _retry_count, _last_attempt
+
+    # ── 階段 1：等待排程時間 ──────────────────────────────────────────
+    if scheduled_time:
+        wait_secs = (scheduled_time - datetime.now()).total_seconds()
+        if wait_secs > 0:
+            _state = "waiting"
+            _countdown_secs = int(wait_secs)
+            logger.info(f"⏰ 排程等待中，將於 {scheduled_time.strftime('%Y/%m/%d %H:%M')} 自動開始")
+            try:
+                while _countdown_secs > 0:
+                    await asyncio.sleep(1)
+                    _countdown_secs = max(0, _countdown_secs - 1)
+            except asyncio.CancelledError:
+                _state = "idle"
+                _countdown_secs = 0
+                logger.info("⛔ 排程已取消。")
+                raise
+
+    _countdown_secs = 0
+
+    # ── 階段 2：執行搶票 ──────────────────────────────────────────────
     _state = "running"
+    _retry_count = 0
     logger.info("▶  開始搶票任務")
     try:
-        success = await run_booking(cfg)
+        # 嘗試傳入 on_retry 回呼（booker 若支援則使用）
+        try:
+            success = await run_booking(cfg, on_retry=_on_retry)
+        except TypeError:
+            # booker 舊版不支援 on_retry 參數，退化處理
+            success = await run_booking(cfg)
+
         _state = "success" if success else "failed"
         if success:
             logger.info("🎉 搶票成功！")
@@ -80,6 +125,7 @@ async def _run(cfg: BookingConfig) -> None:
             logger.warning("❌ 搶票任務結束，未能取得票券。")
     except asyncio.CancelledError:
         _state = "idle"
+        _retry_count = 0
         logger.info("⛔ 搶票任務已取消。")
         raise
     except Exception as e:
@@ -88,18 +134,18 @@ async def _run(cfg: BookingConfig) -> None:
 
 
 # ── 公開介面 ─────────────────────────────────────────────────────────
-async def start(cfg: BookingConfig) -> None:
+async def start(cfg: BookingConfig, scheduled_time: datetime | None = None) -> None:
     """啟動搶票任務（若已在執行中則直接返回）。"""
     global _current_task, _state
     if _current_task and not _current_task.done():
         logger.warning("⚠️  任務已在執行中，請先停止再重新開始。")
         return
-    _current_task = asyncio.create_task(_run(cfg))
+    _current_task = asyncio.create_task(_run(cfg, scheduled_time))
 
 
 async def stop() -> None:
-    """取消正在執行的任務。"""
-    global _state
+    """取消正在執行或等待中的任務。"""
+    global _state, _countdown_secs, _retry_count
     if _current_task and not _current_task.done():
         _current_task.cancel()
         try:
@@ -107,6 +153,8 @@ async def stop() -> None:
         except asyncio.CancelledError:
             pass
     _state = "idle"
+    _countdown_secs = 0
+    _retry_count = 0
     logger.info("⏹  任務已停止。")
 
 

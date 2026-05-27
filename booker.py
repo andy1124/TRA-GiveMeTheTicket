@@ -547,7 +547,6 @@ async def fill_booking_form(page: Page, cfg: BookingConfig) -> None:
     elif not cfg.accept_seat_exchange and is_checked:
         await chg.uncheck()
 
-    await _handle_captcha(page, cfg)
     logger.info("Form filled.")
 
 
@@ -595,93 +594,134 @@ async def check_result(page: Page) -> str:
     return "unknown"
 
 
-async def select_first_train_and_next(page: Page) -> None:
+async def select_first_train_and_next(page: Page, cfg: "BookingConfig | None" = None) -> None:
     """
     在 queryTrain 列車清單頁面，選取第一可用班次（右側 radio），
-    點擊「下一步：選擇票種」後等待 tip115 訂票確認頁面載入。
-    （2026-05 新版流程：form submit → queryTrain → select → tip115 訂票成功）
+    處理驗證碼（如出現），點擊「下一步：選擇票種」後等待確認頁面載入。
+
+    2026-05 新版流程：form submit → queryTrain → select radio → 填驗證碼 → 下一步 → 訂票成功
+    驗證碼失敗時會在此頁面內自動重試（最多 MAX_CAPTCHA_RETRIES 次）。
+    每次重試都會重新確認 radio 選擇，避免驗證碼失敗後選擇被取消。
     """
-    logger.info("  [train list] 選擇第一可用班次...")
 
-    # 點選第一個 radio button（「選擇」欄）
-    # queryTrain 頁面的 radio 通常是 input[type='radio'] 或帶特定 class
-    radio_selectors = [
-        "td input[type='radio']",      # 表格列內的 radio（最具體）
-        "input[type='radio']",         # 頁面上任意 radio（fallback）
-    ]
-    radio_clicked = False
-    for sel in radio_selectors:
-        try:
-            radio = page.locator(sel).first
-            if await radio.is_visible(timeout=2000):
-                await radio.click(force=True)
-                logger.info(f"  [train list] Radio 已點選（selector: {sel}）")
-                radio_clicked = True
-                break
-            # radio 不可見時嘗試點 label（TRA 常見：radio hidden + label clickable）
-            rid = await radio.get_attribute("id")
-            if rid:
-                lbl = page.locator(f"label[for='{rid}']").first
-                if await lbl.is_visible(timeout=1000):
-                    await lbl.click()
-                    logger.info(f"  [train list] Radio label 已點選（id={rid}）")
-                    radio_clicked = True
-                    break
-        except Exception as e:
-            logger.debug(f"  [train list] Radio selector {sel!r} failed: {e}")
-            continue
-
-    if not radio_clicked:
+    async def _ensure_radio_selected() -> bool:
+        """點選第一個可用班次的 radio，回傳是否成功。"""
+        radio_selectors = [
+            "td input[type='radio']",   # 表格列內的 radio（最具體）
+            "input[type='radio']",      # 頁面上任意 radio（fallback）
+        ]
+        for sel in radio_selectors:
+            try:
+                radio = page.locator(sel).first
+                if await radio.is_visible(timeout=2000):
+                    await radio.click(force=True)
+                    logger.info(f"  [train list] Radio 已點選（selector: {sel}）")
+                    return True
+                # radio 不可見時嘗試點 label（TRA 常見：radio hidden + label clickable）
+                rid = await radio.get_attribute("id")
+                if rid:
+                    lbl = page.locator(f"label[for='{rid}']").first
+                    if await lbl.is_visible(timeout=1000):
+                        await lbl.click()
+                        logger.info(f"  [train list] Radio label 已點選（id={rid}）")
+                        return True
+            except Exception as e:
+                logger.debug(f"  [train list] Radio selector {sel!r} failed: {e}")
+                continue
+        # Fallback：直接點「選擇」欄格
         logger.warning("  [train list] 無法點選 radio，嘗試直接點擊「選擇」欄格")
         try:
-            # 點表格最後一欄的第一行（視覺上的○按鈕）
             await page.locator("table tr:nth-child(2) td:last-child").first.click(force=True)
+            return True
         except Exception as e:
             logger.warning(f"  [train list] 點擊「選擇」欄格失敗: {e}")
+            return False
 
+    logger.info("  [train list] 選擇第一可用班次...")
+    await _ensure_radio_selected()
     await asyncio.sleep(0.5)
 
-    # 點擊「下一步：選擇票種」按鈕（右下角）
+    # 「下一步：選擇票種」按鈕 selector 清單（共用於每次重試）
     next_btn_selectors = [
         "button:has-text('下一步：選擇票種')",
         "a:has-text('下一步：選擇票種')",
         "button:has-text('下一步')",
         "a.btn:has-text('下一步')",
     ]
-    next_clicked = False
-    for sel in next_btn_selectors:
-        try:
-            btn = page.locator(sel).last   # 用 .last 確保是頁面底部的按鈕
-            if await btn.is_visible(timeout=2000):
+
+    # ── 驗證碼 + 送出「下一步」迴圈 ────────────────────────────────────
+    # 2026-05 新版：驗證碼出現在選車後、下一步前；驗證失敗時在此頁面重試。
+    for cap_attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
+        # 第二次起：驗證碼答錯後，radio 選擇可能被清空，需要重新點選
+        force_refresh = cap_attempt > 1
+        if force_refresh:
+            logger.info("  [train list] 重試前重新確認班次 radio 選擇...")
+            await _ensure_radio_selected()
+            await asyncio.sleep(0.3)
+
+        # 強制刷新驗證碼圖片（上一次答錯需要新圖）並填入
+        await _handle_captcha(page, cfg, force=force_refresh)
+
+        # 點擊「下一步：選擇票種」按鈕（右下角）
+        next_clicked = False
+        for sel in next_btn_selectors:
+            try:
+                btn = page.locator(sel).last   # 用 .last 確保是頁面底部的按鈕
+                if await btn.is_visible(timeout=2000):
+                    await btn.click()
+                    logger.info(f"  [train list] 「下一步」按鈕已點選（selector: {sel}）")
+                    next_clicked = True
+                    break
+            except Exception as e:
+                logger.debug(f"  [train list] Next btn selector {sel!r} failed: {e}")
+                continue
+
+        if not next_clicked:
+            logger.warning("  [train list] 找不到「下一步」按鈕，嘗試 get_by_role...")
+            try:
+                btn = page.get_by_role("button", name=re.compile(r"下一步")).last
                 await btn.click()
-                logger.info(f"  [train list] 「下一步」按鈕已點選（selector: {sel}）")
                 next_clicked = True
-                break
-        except Exception as e:
-            logger.debug(f"  [train list] Next btn selector {sel!r} failed: {e}")
-            continue
+            except Exception as e:
+                logger.error(f"  [train list] 所有「下一步」嘗試均失敗: {e}")
+                break   # 按鈕消失，跳出迴圈交由外層處理
 
-    if not next_clicked:
-        logger.warning("  [train list] 找不到「下一步」按鈕，嘗試 get_by_role...")
-        try:
-            btn = page.get_by_role("button", name=re.compile(r"下一步")).last
-            await btn.click()
-            next_clicked = True
-        except Exception as e:
-            logger.error(f"  [train list] 所有「下一步」嘗試均失敗: {e}")
-
-    # 等待 tip115 訂票確認頁面或訂票成功訊息
-    logger.info("  [train list] 等待訂票確認頁面...")
-    try:
-        await page.wait_for_function(
-            "document.body.innerText.includes('訂票成功') || "
-            "document.body.innerText.includes('票種') || "
-            "document.body.innerText.includes('付款')",
-            timeout=20000,
+        # 等待結果頁面（成功 / 付款 / 或驗證碼錯誤訊息）
+        logger.info(
+            f"  [train list] 等待結果頁面（captcha attempt {cap_attempt}/{MAX_CAPTCHA_RETRIES}）..."
         )
-        logger.info("  [train list] 訂票確認頁面已載入")
-    except PlaywrightTimeout:
-        logger.warning("  [train list] 等待確認頁超時，繼續執行...")
+        try:
+            await page.wait_for_function(
+                "document.body.innerText.includes('訂票成功') || "
+                "document.body.innerText.includes('票種') || "
+                "document.body.innerText.includes('付款') || "
+                "document.body.innerText.includes('驗證碼驗證失敗') || "
+                "document.body.innerText.includes('請輸入驗證碼')",
+                timeout=20000,
+            )
+        except PlaywrightTimeout:
+            logger.warning("  [train list] 等待結果頁超時，繼續執行...")
+            break
+
+        # 判斷是驗證碼錯誤還是正常進入確認頁
+        try:
+            page_text = await page.inner_text("body")
+        except Exception:
+            page_text = ""
+
+        if "驗證碼驗證失敗" in page_text or "請輸入驗證碼" in page_text:
+            logger.warning(
+                f"  [train list] 驗證碼錯誤（attempt {cap_attempt}/{MAX_CAPTCHA_RETRIES}），重試..."
+            )
+            if cfg is not None:
+                _save_captcha_sample("captcha_fail", cfg)
+            await asyncio.sleep(1.0)
+            # 繼續迴圈，force_refresh 將在下一輪設為 True
+        else:
+            logger.info("  [train list] 訂票確認頁面已載入")
+            break
+    else:
+        logger.error(f"  [train list] 驗證碼重試耗盡（{MAX_CAPTCHA_RETRIES} 次），放棄此輪...")
 
 
 async def click_reset(page: Page) -> None:
@@ -836,9 +876,9 @@ async def run_booking(cfg: BookingConfig) -> bool:
                     input("\nPress Enter to close browser...")
                     return True
 
-                # ── 新版流程：列車清單頁 → 選車 → 進入訂票確認頁 ───────────
+                # ── 新版流程：列車清單頁 → 選車 → 填驗證碼 → 進入訂票確認頁 ──
                 if result == "train_list":
-                    await select_first_train_and_next(page)
+                    await select_first_train_and_next(page, cfg)
                     result = await check_result(page)
                     _save_captcha_sample(result, cfg)
                     if result == "success":
@@ -879,7 +919,7 @@ async def run_booking(cfg: BookingConfig) -> bool:
 
                         # 驗證碼通過後出現列車清單 → 繼續選車流程
                         if result == "train_list":
-                            await select_first_train_and_next(page)
+                            await select_first_train_and_next(page, cfg)
                             result = await check_result(page)
                             _save_captcha_sample(result, cfg)
                             if result == "success":
