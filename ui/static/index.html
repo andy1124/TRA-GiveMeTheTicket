@@ -60,6 +60,7 @@
       transition: background .3s;
     }
     .status-dot.idle    { background: var(--text-dim); }
+    .status-dot.waiting { background: var(--yellow); animation: pulse 2s infinite; }
     .status-dot.running { background: var(--yellow); animation: pulse 1s infinite; }
     .status-dot.success { background: var(--green); }
     .status-dot.failed  { background: var(--red); }
@@ -123,7 +124,7 @@
     }
 
     input[type=text], input[type=password], input[type=number],
-    input[type=date], select {
+    input[type=date], input[type=datetime-local], select {
       width: 100%; padding: 7px 10px;
       background: var(--surface2); border: 1px solid var(--border);
       border-radius: var(--radius); color: var(--text);
@@ -135,14 +136,16 @@
     }
     select option { background: var(--surface2); }
 
-    /* Date picker icon – lighten on dark background */
-    input[type=date]::-webkit-calendar-picker-indicator {
+    /* Date / datetime-local picker icon */
+    input[type=date]::-webkit-calendar-picker-indicator,
+    input[type=datetime-local]::-webkit-calendar-picker-indicator {
       filter: invert(0.55) brightness(1.8);
       opacity: 0.55;
       cursor: pointer;
       transition: opacity .15s;
     }
-    input[type=date]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+    input[type=date]::-webkit-calendar-picker-indicator:hover,
+    input[type=datetime-local]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
     /* Hide native number spinners */
     input[type=number] { -moz-appearance: textfield; }
@@ -377,7 +380,7 @@
         </div>
       </div>
 
-      <!-- 自動化設定（僅顯示 retry_interval，Phase 2 完整展開） -->
+      <!-- 自動化設定 -->
       <div class="section">
         <div class="section-title">自動化設定</div>
 
@@ -417,6 +420,27 @@
             <input type="checkbox" id="use_real_chrome" checked />
             <span class="toggle-slider"></span>
           </label>
+        </div>
+      </div>
+
+      <!-- 排程設定 -->
+      <div class="section">
+        <div class="section-title">排程設定</div>
+
+        <div class="toggle-row">
+          <div>
+            <div class="label-text">啟用排程</div>
+            <div class="label-sub">到指定時間才自動開始搶票</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="schedule_enabled" onchange="toggleSchedule()" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div id="schedule_time_row" class="form-row" style="display:none">
+          <label>開始日期時間</label>
+          <input type="datetime-local" id="scheduled_time" />
         </div>
       </div>
 
@@ -498,19 +522,18 @@ async function loadConfig() {
 
 // ── 儲存設定 ──────────────────────────────────────────────────────────
 async function saveConfig() {
-  // 驗證
   const idNum = getVal('id_number').trim();
   const dep   = getVal('departure_station');
   const arr   = getVal('arrival_station');
   const date  = getVal('date');
   const train = getVal('train_number').trim();
 
-  if (!idNum)  return showToast('請填寫身分證字號', 'err');
-  if (!dep)    return showToast('請選擇出發站', 'err');
-  if (!arr)    return showToast('請選擇抵達站', 'err');
-  if (dep === arr) return showToast('出發站與抵達站不可相同', 'err');
-  if (!date)   return showToast('請選擇乘車日期', 'err');
-  if (!train)  return showToast('請填寫車次號碼', 'err');
+  if (!idNum)  { showToast('請填寫身分證字號', 'err'); return false; }
+  if (!dep)    { showToast('請選擇出發站', 'err'); return false; }
+  if (!arr)    { showToast('請選擇抵達站', 'err'); return false; }
+  if (dep === arr) { showToast('出發站與抵達站不可相同', 'err'); return false; }
+  if (!date)   { showToast('請選擇乘車日期', 'err'); return false; }
+  if (!train)  { showToast('請填寫車次號碼', 'err'); return false; }
 
   const payload = {
     booking: {
@@ -544,25 +567,59 @@ async function saveConfig() {
     });
     if (res.ok) {
       showToast('✅ 設定已儲存', 'ok');
+      return true;
     } else {
       const err = await res.json();
       showToast('儲存失敗：' + (err.detail || res.status), 'err');
+      return false;
     }
   } catch(e) {
     showToast('網路錯誤：' + e.message, 'err');
+    return false;
+  }
+}
+
+// ── 排程 ──────────────────────────────────────────────────────────────
+function toggleSchedule() {
+  const enabled = getCheck('schedule_enabled');
+  document.getElementById('schedule_time_row').style.display = enabled ? '' : 'none';
+  if (enabled && !getVal('scheduled_time')) {
+    // 預設：明天 08:00
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(8, 0, 0, 0);
+    const pad = n => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setVal('scheduled_time', local);
   }
 }
 
 // ── 開始 / 停止 ───────────────────────────────────────────────────────
+let _notifiedSuccess = false;
+
 async function startBooking() {
-  // 先儲存設定
-  await saveConfig();
+  const saved = await saveConfig();
+  if (!saved) return;
+
+  _notifiedSuccess = false;  // 每次新搶票重置通知旗標
+
+  const body = {};
+  if (getCheck('schedule_enabled')) {
+    const st = getVal('scheduled_time');
+    if (!st) { showToast('請選擇排程開始時間', 'err'); return; }
+    if (new Date(st) <= new Date()) { showToast('排程時間必須是未來時間', 'err'); return; }
+    body.scheduled_time = st;  // datetime-local 格式即為 ISO 前 16 碼，FastAPI 接受
+  }
 
   try {
-    const res = await fetch('/api/start', { method: 'POST' });
+    const res = await fetch('/api/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
     if (res.ok) {
-      setRunningUI(true);
-      showToast('▶ 搶票已啟動', 'ok');
+      showToast(body.scheduled_time ? '⏰ 排程已設定' : '▶ 搶票已啟動', 'ok');
+      pollStatus();  // 立即更新 UI 狀態，不等下一個 interval
     } else {
       const err = await res.json();
       showToast('啟動失敗：' + (err.detail || res.status), 'err');
@@ -575,47 +632,80 @@ async function startBooking() {
 async function stopBooking() {
   try {
     await fetch('/api/stop', { method: 'POST' });
-    setRunningUI(false);
+    pollStatus();  // 立即更新 UI 狀態
     showToast('⏹ 已停止', 'ok');
   } catch(e) {
     showToast('停止失敗：' + e.message, 'err');
   }
 }
 
-function setRunningUI(running) {
-  document.getElementById('btn-start').disabled = running;
-  document.getElementById('btn-stop').disabled  = !running;
-  const dot  = document.getElementById('status-dot');
-  const text = document.getElementById('status-text');
-  if (running) {
-    dot.className  = 'status-dot running';
-    text.textContent = '執行中';
-  } else {
-    dot.className  = 'status-dot idle';
-    text.textContent = '閒置';
-  }
-}
+// ── 輪詢狀態（每 1 秒）────────────────────────────────────────────────
+let _prevState = 'idle';
 
-// 輪詢狀態（每 2 秒）
 async function pollStatus() {
   try {
     const res = await fetch('/api/status');
     if (!res.ok) return;
-    const { state } = await res.json();
-    const dot  = document.getElementById('status-dot');
-    const text = document.getElementById('status-text');
+    const { state, countdown_secs, retry_count } = await res.json();
+    const dot      = document.getElementById('status-dot');
+    const text     = document.getElementById('status-text');
     const startBtn = document.getElementById('btn-start');
     const stopBtn  = document.getElementById('btn-stop');
 
     dot.className = 'status-dot ' + state;
-    const labels = { idle:'閒置', running:'執行中', success:'搶票成功 🎉', failed:'失敗' };
-    text.textContent = labels[state] || state;
 
-    startBtn.disabled = (state === 'running');
-    stopBtn.disabled  = (state !== 'running');
+    if (state === 'waiting') {
+      const h = Math.floor(countdown_secs / 3600);
+      const m = Math.floor((countdown_secs % 3600) / 60);
+      const s = countdown_secs % 60;
+      const pad = n => String(n).padStart(2, '0');
+      text.textContent = `⏰ 倒數 ${pad(h)}:${pad(m)}:${pad(s)}`;
+    } else if (state === 'running') {
+      text.textContent = retry_count > 0 ? `執行中（第 ${retry_count} 次）` : '執行中';
+    } else if (state === 'success') {
+      text.textContent = '搶票成功 🎉';
+      if (_prevState !== 'success' && !_notifiedSuccess) {
+        _notifiedSuccess = true;
+        triggerNotification();
+      }
+    } else if (state === 'failed') {
+      text.textContent = '搶票失敗';
+    } else {
+      text.textContent = '閒置';
+    }
+
+    _prevState = state;
+
+    const busy = (state === 'running' || state === 'waiting');
+    startBtn.disabled = busy;
+    stopBtn.disabled  = !busy;
   } catch(e) {}
 }
-setInterval(pollStatus, 2000);
+setInterval(pollStatus, 1000);
+
+// ── 桌面通知（Notification API）──────────────────────────────────────
+function triggerNotification() {
+  if (!('Notification' in window)) return;
+  const send = () => {
+    try {
+      new Notification('🎉 搶票成功！', {
+        body: '台鐵票已搶到，請前往確認訂單並完成付款。',
+      });
+    } catch(e) {}
+  };
+  if (Notification.permission === 'granted') {
+    send();
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(p => { if (p === 'granted') send(); });
+  }
+}
+
+// 頁面載入時預先請求通知權限（讓使用者在搶票前就授權，成功時才能即時通知）
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
 
 // ── WebSocket Log ─────────────────────────────────────────────────────
 let ws = null;
@@ -736,6 +826,7 @@ const setSelect = (id, v) => {
 fillStations();
 loadConfig();
 connectWS();
+requestNotificationPermission();
 </script>
 </body>
 </html>
