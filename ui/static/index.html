@@ -58,6 +58,7 @@
       width: 8px; height: 8px; border-radius: 50%;
       background: var(--text-dim);
       transition: background .3s;
+      flex-shrink: 0;
     }
     .status-dot.idle    { background: var(--text-dim); }
     .status-dot.waiting { background: var(--yellow); animation: pulse 2s infinite; }
@@ -66,6 +67,13 @@
     .status-dot.failed  { background: var(--red); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    .status-info { display: flex; flex-direction: column; gap: 3px; }
+
+    #job-results-strip {
+      display: none; gap: 3px; flex-wrap: wrap;
+      font-size: 13px; line-height: 1;
+    }
 
     .header-actions { margin-left: auto; display: flex; gap: 8px; }
 
@@ -87,7 +95,7 @@
     /* ── Main Content ──────────────────────────────────────────── */
     .main {
       display: grid;
-      grid-template-columns: 380px 1fr;
+      grid-template-columns: 390px 1fr;
       gap: 0;
       flex: 1;
       overflow: hidden;
@@ -136,30 +144,22 @@
     }
     select option { background: var(--surface2); }
 
-    /* Date / datetime-local picker icon */
     input[type=date]::-webkit-calendar-picker-indicator,
     input[type=datetime-local]::-webkit-calendar-picker-indicator {
       filter: invert(0.55) brightness(1.8);
-      opacity: 0.55;
-      cursor: pointer;
-      transition: opacity .15s;
+      opacity: 0.55; cursor: pointer; transition: opacity .15s;
     }
     input[type=date]::-webkit-calendar-picker-indicator:hover,
     input[type=datetime-local]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
-    /* Hide native number spinners */
     input[type=number] { -moz-appearance: textfield; }
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
-    /* Custom number wrapper */
     .num-wrapper {
       display: flex; align-items: stretch;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      background: var(--surface2);
-      transition: border-color .15s;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; background: var(--surface2); transition: border-color .15s;
     }
     .num-wrapper:focus-within { border-color: var(--accent); }
     .num-wrapper input[type=number] {
@@ -172,15 +172,13 @@
       color: var(--text-dim); font-size: 15px; line-height: 1;
       cursor: pointer; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
-      transition: background .12s, color .12s;
-      user-select: none;
+      transition: background .12s, color .12s; user-select: none;
     }
     .num-btn-dec { border-right: 1px solid var(--border); }
     .num-btn-inc { border-left:  1px solid var(--border); }
     .num-btn:hover  { background: rgba(79,140,255,.12); color: var(--accent); }
     .num-btn:active { background: rgba(79,140,255,.22); }
 
-    /* Radio group */
     .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
     .radio-group label {
       display: flex; align-items: center; gap: 5px;
@@ -195,7 +193,6 @@
       background: rgba(79,140,255,.1);
     }
 
-    /* Toggle */
     .toggle-row {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 12px;
@@ -209,19 +206,16 @@
     .toggle input { opacity: 0; width: 0; height: 0; }
     .toggle-slider {
       position: absolute; inset: 0; cursor: pointer;
-      background: var(--border); border-radius: 22px;
-      transition: background .2s;
+      background: var(--border); border-radius: 22px; transition: background .2s;
     }
     .toggle-slider::before {
       content: ''; position: absolute;
       height: 16px; width: 16px; left: 3px; bottom: 3px;
-      background: #fff; border-radius: 50%;
-      transition: transform .2s;
+      background: #fff; border-radius: 50%; transition: transform .2s;
     }
     .toggle input:checked + .toggle-slider { background: var(--accent); }
     .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
 
-    /* Save button area */
     .save-area {
       padding: 12px 0 0;
       border-top: 1px solid var(--border);
@@ -229,13 +223,67 @@
     }
     .save-area .btn { width: 100%; justify-content: center; }
 
+    /* ── Job Cards ─────────────────────────────────────────────── */
+    #job-list { margin-bottom: 10px; }
+
+    .job-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      margin-bottom: 8px; overflow: hidden; transition: border-color .15s;
+    }
+    .job-card:hover { border-color: #3d4260; }
+
+    .job-card-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 10px; background: var(--surface2);
+      cursor: pointer; user-select: none; transition: background .12s;
+    }
+    .job-card-header:hover { background: #2a2f42; }
+
+    .job-num-badge {
+      font-size: 11px; font-weight: 700; color: var(--accent);
+      background: rgba(79,140,255,.12);
+      padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+    }
+
+    .job-card-title {
+      font-size: 12px; color: var(--text);
+      flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .job-card-actions { display: flex; gap: 3px; flex-shrink: 0; }
+
+    .job-btn {
+      background: transparent; border: 1px solid var(--border);
+      border-radius: 4px; color: var(--text-dim);
+      font-size: 11px; width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all .12s;
+    }
+    .job-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(79,140,255,.08); }
+    .job-btn:disabled { opacity: .3; cursor: not-allowed; pointer-events: none; }
+    .job-btn-del:hover { border-color: var(--red); color: var(--red); background: rgba(242,100,100,.08); }
+
+    .job-card-chevron { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
+
+    .job-card-body {
+      padding: 12px 12px 4px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .job-card.collapsed .job-card-body { display: none; }
+
+    .add-job-btn {
+      width: 100%; justify-content: center;
+      font-size: 12px; padding: 6px;
+      border-style: dashed;
+    }
+
     /* ── Log Panel ─────────────────────────────────────────────── */
     .log-header {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 16px;
       border-bottom: 1px solid var(--border);
-      background: var(--surface);
-      flex-shrink: 0;
+      background: var(--surface); flex-shrink: 0;
     }
     .log-header-title { font-size: 12px; font-weight: 700; color: var(--text-dim); letter-spacing: .5px; }
     .log-header-actions { margin-left: auto; display: flex; gap: 6px; }
@@ -255,12 +303,10 @@
     .log-line { display: flex; gap: 10px; }
     .log-line .ts { color: var(--text-dim); flex-shrink: 0; }
     .log-line .lv { flex-shrink: 0; width: 38px; text-align: center;
-                    border-radius: 3px; font-size: 10px; font-weight: 700;
-                    padding: 1px 0; }
+                    border-radius: 3px; font-size: 10px; font-weight: 700; padding: 1px 0; }
     .log-line .msg { white-space: pre-wrap; word-break: break-all; }
 
     .log-line.INFO  .lv { background: rgba(79,140,255,.2); color: var(--accent); }
-    .log-line.WARN, .log-line.WARNING { }
     .log-line.WARN  .lv,
     .log-line.WARNING .lv { background: rgba(245,166,35,.2); color: var(--yellow); }
     .log-line.ERROR .lv { background: rgba(242,100,100,.2); color: var(--red); }
@@ -273,7 +319,6 @@
       font-weight: 600; font-size: 13px;
     }
 
-    /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -302,7 +347,10 @@
     <span class="logo">🚂 TRA-GiveMeTheTicket</span>
     <div class="status-badge">
       <div class="status-dot idle" id="status-dot"></div>
-      <span id="status-text">閒置</span>
+      <div class="status-info">
+        <span id="status-text">閒置</span>
+        <div id="job-results-strip"></div>
+      </div>
     </div>
     <div class="header-actions">
       <button class="btn btn-primary" id="btn-start" onclick="startBooking()">▶ 開始搶票</button>
@@ -316,73 +364,24 @@
     <!-- 左側：設定表單 -->
     <div class="sidebar">
 
-      <!-- 訂票設定 -->
+      <!-- 搶票任務列表 -->
       <div class="section">
-        <div class="section-title">訂票設定</div>
-
-        <div class="form-row">
-          <label>身分證字號</label>
-          <input type="password" id="id_number" placeholder="A123456789" autocomplete="off" />
-        </div>
-
-        <div class="form-row">
-          <label>出發站</label>
-          <select id="departure_station">
-            <option value="">— 請選擇 —</option>
-          </select>
-        </div>
-
-        <div class="form-row">
-          <label>抵達站</label>
-          <select id="arrival_station">
-            <option value="">— 請選擇 —</option>
-          </select>
-        </div>
-
-        <div class="form-row">
-          <label>乘車日期</label>
-          <input type="date" id="date" />
-        </div>
-
-        <div class="form-row">
-          <label>車次號碼</label>
-          <input type="text" id="train_number" placeholder="例：283" />
-        </div>
-
-        <div class="form-row">
-          <label>票數（1-10）</label>
-          <div class="num-wrapper">
-            <button class="num-btn num-btn-dec" type="button" onclick="stepNum('ticket_count',-1)">−</button>
-            <input type="number" id="ticket_count" min="1" max="10" value="1" />
-            <button class="num-btn num-btn-inc" type="button" onclick="stepNum('ticket_count', 1)">+</button>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <label>座位偏好</label>
-          <div class="radio-group" id="seat_preference">
-            <label><input type="radio" name="seat_pref" value="none" checked />不指定</label>
-            <label><input type="radio" name="seat_pref" value="window" />靠窗</label>
-            <label><input type="radio" name="seat_pref" value="aisle" />靠走道</label>
-            <label><input type="radio" name="seat_pref" value="table" />桌型座</label>
-          </div>
-        </div>
-
-        <div class="toggle-row">
-          <div>
-            <div class="label-text">接受換座</div>
-            <div class="label-sub">接受同班車不同座位</div>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="accept_seat_exchange" checked />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
+        <div class="section-title">搶票任務列表</div>
+        <div id="job-list"></div>
+        <button class="btn btn-ghost add-job-btn" onclick="addJob()">＋ 新增任務</button>
       </div>
 
       <!-- 自動化設定 -->
       <div class="section">
         <div class="section-title">自動化設定</div>
+
+        <div class="form-row">
+          <label>任務失敗後</label>
+          <select id="on_job_exhaust">
+            <option value="skip">略過，繼續下一個任務</option>
+            <option value="stop">停止所有任務</option>
+          </select>
+        </div>
 
         <div class="form-row">
           <label>重試間隔（秒）</label>
@@ -469,7 +468,7 @@
 <div id="toast"></div>
 
 <script>
-// ── 常用台鐵站名 ──────────────────────────────────────────────────────
+// ── 站名清單 ─────────────────────────────────────────────────────────
 const STATIONS = [
   '基隆','臺北','板橋','桃園','中壢','楊梅','新竹','竹南','苗栗','豐富',
   '臺中','彰化','員林','田中','二水','斗六','斗南','嘉義','水上','後壁',
@@ -478,18 +477,236 @@ const STATIONS = [
   '宜蘭','羅東','蘇澳','蘇澳新',
 ];
 
-function fillStations() {
-  ['departure_station','arrival_station'].forEach(id => {
-    const sel = document.getElementById(id);
-    const firstOpt = sel.options[0];
-    sel.innerHTML = '';
-    sel.appendChild(firstOpt);
-    STATIONS.forEach(s => {
-      const o = document.createElement('option');
-      o.value = o.textContent = s;
-      sel.appendChild(o);
-    });
-  });
+const SEAT_OPTIONS = [
+  { value: 'none',   label: '不指定' },
+  { value: 'window', label: '靠窗' },
+  { value: 'aisle',  label: '靠走道' },
+  { value: 'table',  label: '桌型座' },
+];
+
+// ── 工具函式 ──────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function dateForInput(d) {
+  return d ? String(d).replace(/\//g, '-') : '';
+}
+
+const getVal    = id => document.getElementById(id)?.value ?? '';
+const setVal    = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+const getCheck  = id => document.getElementById(id)?.checked ?? false;
+const setCheck  = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v; };
+const setSelect = (id, v) => {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  for (const o of sel.options) if (o.value === v) { sel.value = v; return; }
+};
+
+function stepNum(id, delta) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const min = el.min !== '' ? parseFloat(el.min) : -Infinity;
+  const max = el.max !== '' ? parseFloat(el.max) :  Infinity;
+  el.value = Math.min(max, Math.max(min, (parseFloat(el.value) || 0) + delta));
+}
+
+// ── Job 狀態 ──────────────────────────────────────────────────────────
+let jobs = [];
+
+function defaultJob() {
+  return {
+    label: '', id_number: '', departure_station: '', arrival_station: '',
+    date: '', train_number: '', ticket_count: 1,
+    seat_preference: 'none', accept_seat_exchange: true,
+  };
+}
+
+function stationOptions(selected) {
+  const opts = STATIONS.map(s =>
+    `<option value="${escAttr(s)}"${s === selected ? ' selected' : ''}>${escHtml(s)}</option>`
+  ).join('');
+  return `<option value="">— 請選擇 —</option>` + opts;
+}
+
+function seatRadios(cardIndex, selected) {
+  const sel = selected || 'none';
+  return SEAT_OPTIONS.map(s =>
+    `<label><input type="radio" name="seat_pref_${cardIndex}" value="${escAttr(s.value)}"${s.value === sel ? ' checked' : ''} />${escHtml(s.label)}</label>`
+  ).join('');
+}
+
+function jobCardTitle(job) {
+  const lbl = (job.label || '').trim();
+  if (lbl) return lbl;
+  const train = job.train_number || '—';
+  const id    = job.id_number ? job.id_number.substring(0, 3) + '***' : '—';
+  return `Train ${train} — ${id}`;
+}
+
+function renderJobCard(job, i, total) {
+  const title     = jobCardTitle(job);
+  const collapsed = i > 0 ? ' collapsed' : '';
+  const chevron   = i > 0 ? '▼' : '▲';
+  return `
+<div class="job-card${collapsed}" id="job-card-${i}">
+  <div class="job-card-header" onclick="toggleCard(${i})">
+    <span class="job-num-badge">#${i + 1}</span>
+    <span class="job-card-title" id="job-card-title-${i}">${escHtml(title)}</span>
+    <div class="job-card-actions" onclick="event.stopPropagation()">
+      <button class="job-btn" onclick="moveJob(${i},-1)" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
+      <button class="job-btn" onclick="moveJob(${i}, 1)" ${i === total - 1 ? 'disabled' : ''} title="下移">↓</button>
+      <button class="job-btn job-btn-del" onclick="deleteJob(${i})" title="刪除此任務">✕</button>
+    </div>
+    <span class="job-card-chevron">${chevron}</span>
+  </div>
+  <div class="job-card-body">
+    <div class="form-row">
+      <label>自訂名稱（選填）</label>
+      <input type="text" id="job-${i}-label" value="${escAttr(job.label || '')}"
+             placeholder="例：爸爸-0622太魯閣" oninput="onJobTitleChange(${i})" />
+    </div>
+    <div class="form-row">
+      <label>身分證字號</label>
+      <input type="password" id="job-${i}-id_number" value="${escAttr(job.id_number || '')}"
+             placeholder="A123456789" autocomplete="off" oninput="onJobTitleChange(${i})" />
+    </div>
+    <div class="form-row">
+      <label>出發站</label>
+      <select id="job-${i}-departure_station">${stationOptions(job.departure_station || '')}</select>
+    </div>
+    <div class="form-row">
+      <label>抵達站</label>
+      <select id="job-${i}-arrival_station">${stationOptions(job.arrival_station || '')}</select>
+    </div>
+    <div class="form-row">
+      <label>乘車日期</label>
+      <input type="date" id="job-${i}-date" value="${escAttr(dateForInput(job.date || ''))}" />
+    </div>
+    <div class="form-row">
+      <label>車次號碼</label>
+      <input type="text" id="job-${i}-train_number" value="${escAttr(String(job.train_number || ''))}"
+             placeholder="例：283" oninput="onJobTitleChange(${i})" />
+    </div>
+    <div class="form-row">
+      <label>票數（1-10）</label>
+      <div class="num-wrapper">
+        <button class="num-btn num-btn-dec" type="button" onclick="stepNum('job-${i}-ticket_count',-1)">−</button>
+        <input type="number" id="job-${i}-ticket_count" min="1" max="10" value="${job.ticket_count ?? 1}" />
+        <button class="num-btn num-btn-inc" type="button" onclick="stepNum('job-${i}-ticket_count', 1)">+</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>座位偏好</label>
+      <div class="radio-group">${seatRadios(i, job.seat_preference)}</div>
+    </div>
+    <div class="toggle-row">
+      <div>
+        <div class="label-text">接受換座</div>
+        <div class="label-sub">接受同班車不同座位</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="job-${i}-accept_seat_exchange" ${job.accept_seat_exchange !== false ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+</div>`.trim();
+}
+
+function renderJobs() {
+  document.getElementById('job-list').innerHTML =
+    jobs.map((job, i) => renderJobCard(job, i, jobs.length)).join('');
+}
+
+function syncJobsFromDOM() {
+  const count = document.querySelectorAll('.job-card').length;
+  jobs = Array.from({ length: count }, (_, i) => readJobFromCard(i));
+}
+
+function readJobFromCard(i) {
+  return {
+    label:                document.getElementById(`job-${i}-label`)?.value ?? '',
+    id_number:            document.getElementById(`job-${i}-id_number`)?.value ?? '',
+    departure_station:    document.getElementById(`job-${i}-departure_station`)?.value ?? '',
+    arrival_station:      document.getElementById(`job-${i}-arrival_station`)?.value ?? '',
+    date:                 document.getElementById(`job-${i}-date`)?.value ?? '',
+    train_number:         document.getElementById(`job-${i}-train_number`)?.value ?? '',
+    ticket_count:         parseInt(document.getElementById(`job-${i}-ticket_count`)?.value) || 1,
+    seat_preference:      document.querySelector(`input[name="seat_pref_${i}"]:checked`)?.value ?? 'none',
+    accept_seat_exchange: document.getElementById(`job-${i}-accept_seat_exchange`)?.checked ?? true,
+  };
+}
+
+function toggleCard(i) {
+  const card    = document.getElementById(`job-card-${i}`);
+  const chevron = card?.querySelector('.job-card-chevron');
+  if (!card) return;
+  const wasCollapsed = card.classList.contains('collapsed');
+  card.classList.toggle('collapsed');
+  if (chevron) chevron.textContent = wasCollapsed ? '▲' : '▼';
+}
+
+function onJobTitleChange(i) {
+  const label = document.getElementById(`job-${i}-label`)?.value?.trim() || '';
+  const train = document.getElementById(`job-${i}-train_number`)?.value?.trim() || '—';
+  const id    = document.getElementById(`job-${i}-id_number`)?.value?.trim() || '';
+  const title = label || `Train ${train} — ${id ? id.substring(0, 3) + '***' : '—'}`;
+  const el = document.getElementById(`job-card-title-${i}`);
+  if (el) el.textContent = title;
+}
+
+function addJob() {
+  syncJobsFromDOM();
+  const template = jobs.length > 0 ? { ...jobs[jobs.length - 1] } : defaultJob();
+  template.label = '';
+  jobs.push(template);
+  renderJobs();
+  // collapse all other cards
+  for (let i = 0; i < jobs.length - 1; i++) {
+    const card = document.getElementById(`job-card-${i}`);
+    const chev = card?.querySelector('.job-card-chevron');
+    if (card && !card.classList.contains('collapsed')) {
+      card.classList.add('collapsed');
+      if (chev) chev.textContent = '▼';
+    }
+  }
+  // expand the new card (renderJobCard collapses all cards with i > 0)
+  const newIdx = jobs.length - 1;
+  const newCard = document.getElementById(`job-card-${newIdx}`);
+  const newChev = newCard?.querySelector('.job-card-chevron');
+  if (newCard) {
+    newCard.classList.remove('collapsed');
+    if (newChev) newChev.textContent = '▲';
+  }
+  newCard?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function deleteJob(i) {
+  if (document.querySelectorAll('.job-card').length <= 1) {
+    showToast('至少需要一個搶票任務', 'err');
+    return;
+  }
+  syncJobsFromDOM();
+  jobs.splice(i, 1);
+  renderJobs();
+}
+
+function moveJob(i, dir) {
+  syncJobsFromDOM();
+  const j = i + dir;
+  if (j < 0 || j >= jobs.length) return;
+  [jobs[i], jobs[j]] = [jobs[j], jobs[i]];
+  renderJobs();
+  // expand the card that received focus after moving
+  const card = document.getElementById(`job-card-${j}`);
+  const chev = card?.querySelector('.job-card-chevron');
+  if (card && card.classList.contains('collapsed')) {
+    card.classList.remove('collapsed');
+    if (chev) chev.textContent = '▲';
+  }
 }
 
 // ── 載入設定 ──────────────────────────────────────────────────────────
@@ -498,56 +715,63 @@ async function loadConfig() {
     const res = await fetch('/api/config');
     if (!res.ok) return;
     const data = await res.json();
-    const b = data.booking || {};
+
+    const rawJobs = Array.isArray(data.jobs) && data.jobs.length > 0
+      ? data.jobs : [defaultJob()];
+    jobs = rawJobs;
+    renderJobs();
+
     const a = data.automation || {};
-
-    setVal('id_number',          b.id_number    || '');
-    setSelect('departure_station', b.departure_station || '');
-    setSelect('arrival_station',   b.arrival_station   || '');
-    // date: YYYY/MM/DD → YYYY-MM-DD for input[type=date]
-    if (b.date) setVal('date', b.date.replace(/\//g, '-'));
-    setVal('train_number',       b.train_number || '');
-    setVal('ticket_count',       b.ticket_count ?? 1);
-    setRadio('seat_pref',        b.seat_preference || 'none');
-    setCheck('accept_seat_exchange', b.accept_seat_exchange !== false);
-
+    setSelect('on_job_exhaust', a.on_job_exhaust || 'skip');
     setVal('retry_interval', a.retry_interval ?? 2);
     setVal('max_retries',    a.max_retries    ?? 1000);
     setVal('slow_mo',        a.slow_mo        ?? 100);
     setCheck('use_real_chrome', a.use_real_chrome !== false);
   } catch(e) {
     console.warn('loadConfig error', e);
+    jobs = [defaultJob()];
+    renderJobs();
   }
 }
 
 // ── 儲存設定 ──────────────────────────────────────────────────────────
 async function saveConfig() {
-  const idNum = getVal('id_number').trim();
-  const dep   = getVal('departure_station');
-  const arr   = getVal('arrival_station');
-  const date  = getVal('date');
-  const train = getVal('train_number').trim();
+  syncJobsFromDOM();
 
-  if (!idNum)  { showToast('請填寫身分證字號', 'err'); return false; }
-  if (!dep)    { showToast('請選擇出發站', 'err'); return false; }
-  if (!arr)    { showToast('請選擇抵達站', 'err'); return false; }
-  if (dep === arr) { showToast('出發站與抵達站不可相同', 'err'); return false; }
-  if (!date)   { showToast('請選擇乘車日期', 'err'); return false; }
-  if (!train)  { showToast('請填寫車次號碼', 'err'); return false; }
+  const jobList = [];
+  for (let i = 0; i < jobs.length; i++) {
+    const job   = jobs[i];
+    const idNum = (job.id_number || '').trim();
+    const dep   = job.departure_station || '';
+    const arr   = job.arrival_station   || '';
+    const date  = job.date || '';
+    const train = (job.train_number || '').trim();
 
-  const payload = {
-    booking: {
+    if (!idNum)      { showToast(`任務 ${i+1}：請填寫身分證字號`, 'err'); return false; }
+    if (!dep)        { showToast(`任務 ${i+1}：請選擇出發站`,     'err'); return false; }
+    if (!arr)        { showToast(`任務 ${i+1}：請選擇抵達站`,     'err'); return false; }
+    if (dep === arr) { showToast(`任務 ${i+1}：出發站與抵達站不可相同`, 'err'); return false; }
+    if (!date)       { showToast(`任務 ${i+1}：請選擇乘車日期`,   'err'); return false; }
+    if (!train)      { showToast(`任務 ${i+1}：請填寫車次號碼`,   'err'); return false; }
+
+    jobList.push({
+      label:                job.label || '',
       id_number:            idNum,
       departure_station:    dep,
       arrival_station:      arr,
-      date:                 date.replace(/-/g, '/'),   // YYYY-MM-DD → YYYY/MM/DD
+      date:                 date.replace(/-/g, '/'),
       train_number:         train,
-      ticket_count:         parseInt(getVal('ticket_count')) || 1,
-      seat_preference:      getRadio('seat_pref') || 'none',
-      accept_seat_exchange: getCheck('accept_seat_exchange'),
-    },
+      ticket_count:         job.ticket_count || 1,
+      seat_preference:      job.seat_preference || 'none',
+      accept_seat_exchange: job.accept_seat_exchange !== false,
+    });
+  }
+
+  const payload = {
+    jobs: jobList,
     automation: {
       headless:             false,
+      on_job_exhaust:       getVal('on_job_exhaust') || 'skip',
       retry_interval:       parseFloat(getVal('retry_interval')) || 2,
       max_retries:          parseInt(getVal('max_retries'))       || 1000,
       slow_mo:              parseInt(getVal('slow_mo'))           || 100,
@@ -584,13 +808,13 @@ function toggleSchedule() {
   const enabled = getCheck('schedule_enabled');
   document.getElementById('schedule_time_row').style.display = enabled ? '' : 'none';
   if (enabled && !getVal('scheduled_time')) {
-    // 預設：明天 08:00
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(8, 0, 0, 0);
     const pad = n => String(n).padStart(2, '0');
-    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    setVal('scheduled_time', local);
+    setVal('scheduled_time',
+      `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
   }
 }
 
@@ -601,14 +825,14 @@ async function startBooking() {
   const saved = await saveConfig();
   if (!saved) return;
 
-  _notifiedSuccess = false;  // 每次新搶票重置通知旗標
+  _notifiedSuccess = false;
 
   const body = {};
   if (getCheck('schedule_enabled')) {
     const st = getVal('scheduled_time');
     if (!st) { showToast('請選擇排程開始時間', 'err'); return; }
     if (new Date(st) <= new Date()) { showToast('排程時間必須是未來時間', 'err'); return; }
-    body.scheduled_time = st;  // datetime-local 格式即為 ISO 前 16 碼，FastAPI 接受
+    body.scheduled_time = st;
   }
 
   try {
@@ -619,7 +843,7 @@ async function startBooking() {
     });
     if (res.ok) {
       showToast(body.scheduled_time ? '⏰ 排程已設定' : '▶ 搶票已啟動', 'ok');
-      pollStatus();  // 立即更新 UI 狀態，不等下一個 interval
+      pollStatus();
     } else {
       const err = await res.json();
       showToast('啟動失敗：' + (err.detail || res.status), 'err');
@@ -632,7 +856,7 @@ async function startBooking() {
 async function stopBooking() {
   try {
     await fetch('/api/stop', { method: 'POST' });
-    pollStatus();  // 立即更新 UI 狀態
+    pollStatus();
     showToast('⏹ 已停止', 'ok');
   } catch(e) {
     showToast('停止失敗：' + e.message, 'err');
@@ -640,13 +864,16 @@ async function stopBooking() {
 }
 
 // ── 輪詢狀態（每 1 秒）────────────────────────────────────────────────
-let _prevState = 'idle';
+let _prevState  = 'idle';
+let _lastJobLabel = '';
 
 async function pollStatus() {
   try {
     const res = await fetch('/api/status');
     if (!res.ok) return;
-    const { state, countdown_secs, retry_count } = await res.json();
+    const { state, countdown_secs, retry_count,
+            job_index, total_jobs, current_job_label, job_results } = await res.json();
+
     const dot      = document.getElementById('status-dot');
     const text     = document.getElementById('status-text');
     const startBtn = document.getElementById('btn-start');
@@ -654,19 +881,22 @@ async function pollStatus() {
 
     dot.className = 'status-dot ' + state;
 
+    const jobInfo  = (total_jobs > 1) ? ` — 第 ${job_index + 1}/${total_jobs}` : '';
+    const retryInfo = retry_count > 0 ? `（第 ${retry_count} 次）` : '';
+
     if (state === 'waiting') {
       const h = Math.floor(countdown_secs / 3600);
       const m = Math.floor((countdown_secs % 3600) / 60);
       const s = countdown_secs % 60;
       const pad = n => String(n).padStart(2, '0');
-      text.textContent = `⏰ 倒數 ${pad(h)}:${pad(m)}:${pad(s)}`;
+      text.textContent = `⏰ 倒數 ${pad(h)}:${pad(m)}:${pad(s)}${jobInfo}`;
     } else if (state === 'running') {
-      text.textContent = retry_count > 0 ? `執行中（第 ${retry_count} 次）` : '執行中';
+      text.textContent = (`執行中${jobInfo} ${retryInfo}`).trim();
     } else if (state === 'success') {
       text.textContent = '搶票成功 🎉';
       if (_prevState !== 'success' && !_notifiedSuccess) {
         _notifiedSuccess = true;
-        triggerNotification();
+        triggerNotification(current_job_label || _lastJobLabel);
       }
     } else if (state === 'failed') {
       text.textContent = '搶票失敗';
@@ -674,7 +904,24 @@ async function pollStatus() {
       text.textContent = '閒置';
     }
 
+    if (current_job_label) _lastJobLabel = current_job_label;
     _prevState = state;
+
+    // Job results strip（多 job 時才顯示）
+    const strip = document.getElementById('job-results-strip');
+    if (Array.isArray(job_results) && job_results.length > 1) {
+      strip.style.display = 'flex';
+      strip.innerHTML = job_results.map((r, i) => {
+        let icon = '⬜';
+        if      (r === 'success') icon = '✅';
+        else if (r === 'failed')  icon = '❌';
+        else if (i === job_index && (state === 'running' || state === 'waiting')) icon = '⏳';
+        return `<span title="任務 ${i + 1}">${icon}</span>`;
+      }).join('');
+    } else {
+      strip.style.display = 'none';
+      strip.innerHTML = '';
+    }
 
     const busy = (state === 'running' || state === 'waiting');
     startBtn.disabled = busy;
@@ -684,13 +931,14 @@ async function pollStatus() {
 setInterval(pollStatus, 1000);
 
 // ── 桌面通知（Notification API）──────────────────────────────────────
-function triggerNotification() {
+function triggerNotification(jobLabel) {
   if (!('Notification' in window)) return;
   const send = () => {
     try {
-      new Notification('🎉 搶票成功！', {
-        body: '台鐵票已搶到，請前往確認訂單並完成付款。',
-      });
+      const body = jobLabel
+        ? `${jobLabel} 訂票成功！請前往確認訂單並完成付款。`
+        : '台鐵票已搶到，請前往確認訂單並完成付款。';
+      new Notification('🎉 搶票成功！', { body });
     } catch(e) {}
   };
   if (Notification.permission === 'granted') {
@@ -700,7 +948,6 @@ function triggerNotification() {
   }
 }
 
-// 頁面載入時預先請求通知權限（讓使用者在搶票前就授權，成功時才能即時通知）
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
@@ -719,13 +966,11 @@ function connectWS() {
   ws.onopen  = () => { dot.className = 'ws-indicator connected'; };
   ws.onclose = () => {
     dot.className = 'ws-indicator';
-    setTimeout(connectWS, 3000);   // 自動重連
+    setTimeout(connectWS, 3000);
   };
   ws.onerror = () => ws.close();
-
   ws.onmessage = (evt) => {
     appendLog(evt.data);
-    // 保持心跳（防止某些 proxy 切斷）
     if (ws.readyState === WebSocket.OPEN) ws.send('ping');
   };
 }
@@ -733,7 +978,6 @@ function connectWS() {
 function appendLog(raw) {
   const out = document.getElementById('log-output');
 
-  // 成功偵測
   if (raw.includes('搶票成功') || raw.includes('🎉')) {
     const banner = document.createElement('div');
     banner.className = 'log-success-banner';
@@ -741,9 +985,8 @@ function appendLog(raw) {
     out.appendChild(banner);
   }
 
-  // 解析格式：HH:MM:SS [LEVEL] message
   const match = raw.match(/^(\d{2}:\d{2}:\d{2})\s+\[(\w+)\]\s+([\s\S]*)$/);
-  const line = document.createElement('div');
+  const line  = document.createElement('div');
   if (match) {
     const [, ts, lv, msg] = match;
     line.className = `log-line ${lv}`;
@@ -757,22 +1000,14 @@ function appendLog(raw) {
   }
   out.appendChild(line);
 
-  // 超過 500 行就移除最舊的
   while (out.children.length > 500) out.removeChild(out.firstChild);
-
-  // 自動捲動到底部
   if (autoScroll) out.scrollTop = out.scrollHeight;
 }
 
-function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// 捲動偵測：使用者往上捲就停止自動捲動
+// ── Log 工具 ─────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  const out = document.getElementById('log-output');
-  out.addEventListener('scroll', () => {
-    autoScroll = (out.scrollHeight - out.scrollTop - out.clientHeight) < 40;
+  document.getElementById('log-output').addEventListener('scroll', function() {
+    autoScroll = (this.scrollHeight - this.scrollTop - this.clientHeight) < 40;
   });
 });
 
@@ -796,34 +1031,7 @@ function showToast(msg, type = '') {
   _toastTimer = setTimeout(() => { el.className = ''; }, 2500);
 }
 
-// ── Custom number step ────────────────────────────────────────────────
-function stepNum(id, delta) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const min = el.min !== '' ? parseFloat(el.min) : -Infinity;
-  const max = el.max !== '' ? parseFloat(el.max) :  Infinity;
-  const cur = parseFloat(el.value) || 0;
-  el.value = Math.min(max, Math.max(min, cur + delta));
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────
-const getVal    = id => document.getElementById(id)?.value ?? '';
-const setVal    = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-const getCheck  = id => document.getElementById(id)?.checked ?? false;
-const setCheck  = (id, v) => { const el = document.getElementById(id); if (el) el.checked = v; };
-const getRadio  = name => document.querySelector(`input[name="${name}"]:checked`)?.value ?? '';
-const setRadio  = (name, v) => {
-  const el = document.querySelector(`input[name="${name}"][value="${v}"]`);
-  if (el) el.checked = true;
-};
-const setSelect = (id, v) => {
-  const sel = document.getElementById(id);
-  if (!sel) return;
-  for (const o of sel.options) if (o.value === v) { sel.value = v; return; }
-};
-
 // ── 初始化 ────────────────────────────────────────────────────────────
-fillStations();
 loadConfig();
 connectWS();
 requestNotificationPermission();

@@ -89,6 +89,9 @@ class BookingConfig:
     # ── 驗證碼蒐集模式 ──────────────────────────────────────────────
     collect_captcha: bool = False          # True = 每次 ddddocr 預測後存圖
     captcha_dataset_dir: str = "captcha_dataset"  # 蒐集根目錄（相對於專案根目錄）
+    # ── 多工搶票 ────────────────────────────────────────────────────
+    label: str = ""              # 自訂名稱（選填，顯示用，如 "爸爸-0622太魯閣"）
+    on_job_exhaust: str = "skip" # skip | stop（耗盡 max_retries 仍失敗時的行為）
 
 
 # ===================================================================
@@ -972,3 +975,199 @@ async def run_booking(cfg: BookingConfig) -> bool:
             raise
         finally:
             await context.close()
+
+
+# ===================================================================
+#  5. Multi-job helpers
+# ===================================================================
+
+async def run_booking_session(
+    page: Page,
+    cfg: BookingConfig,
+    on_retry=None,
+) -> bool:
+    """
+    Execute one booking job on an already-open page.
+    Returns True on success, False on failure or max_retries exhausted.
+    Does NOT manage browser lifecycle — caller opens/closes the context.
+    Does NOT call input() — safe for UI/async use.
+    on_retry(attempt): optional callback called at the start of each attempt.
+    """
+    await navigate_to_booking(page)
+    await fill_booking_form(page, cfg)
+
+    for attempt in range(1, cfg.max_retries + 1):
+        if on_retry:
+            on_retry(attempt)
+        logger.info(f"\n-- Attempt {attempt} --")
+        await submit_booking(page)
+        result = await check_result(page)
+        _save_captcha_sample(result, cfg)
+
+        if result == "success":
+            logger.info("Done! Remember to pay within the deadline.")
+            return True
+
+        if result == "train_list":
+            await select_first_train_and_next(page, cfg)
+            result = await check_result(page)
+            _save_captcha_sample(result, cfg)
+            if result == "success":
+                logger.info("Done! Remember to pay within the deadline.")
+                return True
+            if result == "unknown":
+                logger.warning("Cannot determine result after train selection.")
+                return False
+
+        if result == "unknown":
+            logger.warning("Cannot determine result. Aborting this job.")
+            return False
+
+        if result == "captcha_fail":
+            for cap_retry in range(1, MAX_CAPTCHA_RETRIES + 1):
+                logger.warning(
+                    f"  Captcha fail — retrying ({cap_retry}/{MAX_CAPTCHA_RETRIES})..."
+                )
+                await asyncio.sleep(1.5)
+                await _handle_captcha(page, cfg, force=True)
+                await submit_booking(page)
+                result = await check_result(page)
+                _save_captcha_sample(result, cfg)
+
+                if result == "success":
+                    logger.info("Done! Remember to pay within the deadline.")
+                    return True
+
+                if result == "train_list":
+                    await select_first_train_and_next(page, cfg)
+                    result = await check_result(page)
+                    _save_captcha_sample(result, cfg)
+                    if result == "success":
+                        logger.info("Done! Remember to pay within the deadline.")
+                        return True
+                    break
+
+                if result != "captcha_fail":
+                    break
+
+            if result == "captcha_fail":
+                logger.error(
+                    f"Captcha retry exhausted ({MAX_CAPTCHA_RETRIES} times). "
+                    "Giving up this attempt."
+                )
+
+        if attempt < cfg.max_retries:
+            logger.info(f"Waiting {cfg.retry_interval}s...")
+            await asyncio.sleep(cfg.retry_interval)
+            await click_reset(page)
+            await page.wait_for_selector(
+                "input[type='submit'].btn-3d", state="visible", timeout=15000
+            )
+            pid_val = ""
+            try:
+                pid_val = (await page.locator("#pid").input_value()).strip()
+            except Exception:
+                pass
+            if not pid_val:
+                logger.info("表單資料已消失，重新填寫...")
+                await fill_booking_form(page, cfg)
+            else:
+                logger.info(f"表單資料保留（{pid_val[:3]}*******），僅處理驗證碼")
+                await _handle_captcha(page, cfg)
+            logger.info("Form ready, retrying...")
+
+    logger.warning(f"Max retries ({cfg.max_retries}) reached.")
+    return False
+
+
+async def run_booking_multi(
+    configs: list[BookingConfig],
+    on_job_done=None,
+    on_retry=None,
+) -> list[bool]:
+    """
+    Run multiple booking jobs sequentially, sharing one Chrome context.
+    on_job_done(index, success, cfg): optional callback after each job.
+    Returns list of bool results in job order.
+    Browser settings (profile, headless, slow_mo) taken from configs[0].
+    on_job_exhaust is read from each cfg: "skip" continues, "stop" halts.
+    """
+    if not configs:
+        return []
+
+    first = configs[0]
+    if first.chrome_profile_path:
+        profile_path = first.chrome_profile_path
+        logger.info(f"Using custom Chrome profile: {profile_path}")
+        if first.kill_chrome_on_start:
+            _kill_chrome()
+    else:
+        PROFILE_DIR.mkdir(exist_ok=True)
+        profile_path = str(PROFILE_DIR)
+        logger.info(f"Using project Chrome profile: {profile_path}")
+
+    results: list[bool] = []
+
+    async with async_playwright() as pw:
+        channel = "chrome" if first.use_real_chrome else None
+        logger.info(f"Launching persistent Chrome profile: {profile_path}")
+        try:
+            context: BrowserContext = await pw.chromium.launch_persistent_context(
+                profile_path,
+                channel=channel,
+                headless=first.headless,
+                slow_mo=first.slow_mo,
+                args=BROWSER_ARGS,
+                **COMMON_CONTEXT_OPTS,
+            )
+        except PlaywrightError as e:
+            err = str(e)
+            if "TargetClosedError" in err or "Target page" in err or "has been closed" in err:
+                logger.error(
+                    "\n"
+                    "❌ Chrome profile 被鎖住，無法啟動！\n"
+                    "\n"
+                    "原因：Chrome 仍在背景執行，佔用了 profile 目錄。\n"
+                    "\n"
+                    "解法（擇一）：\n"
+                    "  1. 開啟「工作管理員」→ 找到所有 chrome.exe → 全部結束工作，再重新執行本程式。\n"
+                    "  2. 在 config.yaml 中設定 kill_chrome_on_start: true，讓程式自動處理。\n"
+                    "  3. 不填 chrome_profile_path，改用空白 profile（驗證碼可能仍會出現）。\n"
+                )
+                sys.exit(1)
+            raise
+        await context.add_init_script(STEALTH_JS)
+        page = context.pages[0] if context.pages else await context.new_page()
+
+        try:
+            for i, cfg in enumerate(configs):
+                job_label = cfg.label or f"Train {cfg.train_number} | {cfg.id_number[:3]}******"
+                logger.info(f"\n{'='*60}")
+                logger.info(f"[Job {i+1}/{len(configs)}] 開始：{job_label}")
+                logger.info("=" * 60)
+
+                try:
+                    success = await run_booking_session(page, cfg, on_retry=on_retry)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"[Job {i+1}] 發生例外：{e}")
+                    success = False
+
+                results.append(success)
+                logger.info(
+                    f"[Job {i+1}/{len(configs)}] 結果：{'✅ 成功' if success else '❌ 失敗'}"
+                )
+
+                if on_job_done:
+                    on_job_done(i, success, cfg)
+
+                if not success and cfg.on_job_exhaust == "stop":
+                    logger.warning("[Job %d] on_job_exhaust=stop — 停止後續任務。", i + 1)
+                    results.extend([False] * (len(configs) - len(results)))
+                    break
+
+        finally:
+            await context.close()
+
+    return results

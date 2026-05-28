@@ -3,30 +3,69 @@
 # 複製此檔為 config.yaml 並填入你的資料
 # =========================================
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 【新格式】多工搶票列表（推薦使用）
+#
+# 使用 jobs: 可依序搶多個車次 / 多人的票，全程共用同一個 Chrome 瀏覽器。
+# 程式會從 Job 1 開始，搶到（或耗盡 max_retries）後自動繼續 Job 2，以此類推。
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  - label: "爸爸-0622太魯閣"     # 自訂名稱（選填，顯示於 log 與 UI 狀態列）
+    id_number: "A123456789"      # 身分證字號
+    departure_station: "台北"    # 出發站（填中文站名，例如：台北、新竹、台中）
+    arrival_station: "台中"      # 抵達站
+    date: "2026/06/22"           # 乘車日期，格式：YYYY/MM/DD
+    train_number: "102"          # 車次號碼
+    ticket_count: 1              # 一般座票數
+
+    # 座位偏好：
+    #   "none"   → 不指定（預設）
+    #   "window" → 靠窗
+    #   "aisle"  → 靠走道
+    #   "table"  → 桌型座優先
+    seat_preference: "window"
+
+    # 是否接受同班車換座
+    accept_seat_exchange: true
+
+  - label: "媽媽-0622太魯閣"
+    id_number: "B987654321"
+    departure_station: "台北"
+    arrival_station: "台中"
+    date: "2026/06/22"
+    train_number: "102"
+    ticket_count: 1
+    seat_preference: "window"
+    accept_seat_exchange: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 【舊格式】向後相容（若 config.yaml 沒有 jobs: 鍵，程式自動改用此單筆設定）
+#
+# 只搶一張票的話可以直接沿用此格式，不需改成 jobs: 列表。
+# ─────────────────────────────────────────────────────────────────────────────
 booking:
-  id_number: "A123456789"        # 身分證字號
-  departure_station: "台北"       # 出發站（填中文站名，例如：台北、新竹、台中）
-  arrival_station: "台中"         # 抵達站
-  date: "2026/06/01"             # 乘車日期，格式：YYYY/MM/DD
-  train_number: "139"            # 車次號碼
-  ticket_count: 1                # 一般座票數
-
-  # 座位偏好（完整訂票頁 tip123 支援全部 4 種選項）：
-  #   "none"        → 不指定（預設）
-  #   "window"      → 靠窗
-  #   "aisle"       → 靠走道
-  #   "table"       → 桌型座優先
-  #   （舊值 "no_preference" / "window_seat" 仍可用，自動對應）
+  id_number: "A123456789"
+  departure_station: "台北"
+  arrival_station: "台中"
+  date: "2026/06/01"
+  train_number: "139"
+  ticket_count: 1
   seat_preference: "window"
-
-  # 是否接受同班車換座
   accept_seat_exchange: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 全域自動化設定（套用到所有 jobs）
+# ─────────────────────────────────────────────────────────────────────────────
 automation:
   headless: false          # false = 看得到瀏覽器（建議調試時用 false）
   retry_interval: 3        # 刷票失敗後的等待秒數
-  max_retries: 200         # 最大重試次數
+  max_retries: 200         # 最大重試次數（每個 job 各自計算）
   slow_mo: 300             # 每個操作之間的延遲毫秒（0 = 最快）
+
+  # 單一 job 耗盡 max_retries 仍失敗時的行為：
+  #   skip（預設）：略過此 job，繼續執行下一個
+  #   stop：整個程式立即停止
+  on_job_exhaust: skip
 
   # true = 使用你電腦上安裝的真實 Chrome（避免 reCAPTCHA v3 驗證碼）
   # false = 使用 Playwright 內建 Chromium（可能觸發驗證碼）

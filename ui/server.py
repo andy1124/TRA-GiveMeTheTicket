@@ -104,11 +104,20 @@ async def startup_event():
 # ── REST API ─────────────────────────────────────────────────────────
 @app.get("/api/config")
 async def get_config() -> dict[str, Any]:
-    """讀取 config.yaml，回傳 JSON。"""
+    """讀取 config.yaml，回傳 { jobs: [...], automation: {...} }。
+    若 yaml 只有舊格式 booking: 單鍵，自動轉為 jobs: [booking] 再回傳。
+    """
     try:
         data = _read_yaml()
-        # ruamel CommentedMap → 轉成純 dict 回傳
-        return dict(data)
+        result: dict[str, Any] = {}
+        result["automation"] = dict(data.get("automation") or {})
+        if "jobs" in data and data["jobs"]:
+            result["jobs"] = [dict(j) for j in data["jobs"]]
+        elif "booking" in data and data["booking"]:
+            result["jobs"] = [dict(data["booking"])]
+        else:
+            result["jobs"] = []
+        return result
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="config.yaml 不存在")
 
@@ -134,7 +143,7 @@ async def api_start(body: StartRequest = StartRequest()) -> dict[str, str]:
     可選帶入 scheduled_time（ISO 格式字串），到時間才自動開始。
     """
     try:
-        cfg = booking_runner.load_config_from_yaml()
+        jobs = booking_runner.load_jobs_from_yaml()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"讀取設定失敗：{e}")
 
@@ -145,7 +154,7 @@ async def api_start(body: StartRequest = StartRequest()) -> dict[str, str]:
         except ValueError:
             raise HTTPException(status_code=422, detail=f"scheduled_time 格式錯誤：{body.scheduled_time}")
 
-    await booking_runner.start(cfg, scheduled)
+    await booking_runner.start(jobs, scheduled)
     return {"status": "started"}
 
 
