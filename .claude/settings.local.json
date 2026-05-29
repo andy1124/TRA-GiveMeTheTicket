@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git check-ignore *)",
+      "PowerShell(Get-ChildItem D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\ -Name | Where-Object { $_ -notmatch \"^venv\" -and $_ -notmatch \"^__pycache__\" })",
+      "PowerShell(head *)",
+      "PowerShell($labeled = \\(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\"\\).Count; $errors = \\(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\errors\"\\).Count; $uncertain = \\(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\uncertain\"\\).Count; Write-Host \"labeled: $labeled, errors: $errors, uncertain: $uncertain\")",
+      "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Select-Object -First 30 | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Where-Object { $_.Name -match \"[A-Z]\" } | Select-Object -First 5 | ForEach-Object { $_.FullName })",
+      "PowerShell(& \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\venv\\\\Scripts\\\\python.exe\" -c \"import ddddocr; print\\('ddddocr ok'\\); import tkinter; print\\('tkinter ok'\\)\")",
+      "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Where-Object { $_.Name -cmatch \"[A-Z]\" } | Measure-Object | Select-Object Count)"
+    ]
+  }
+}
