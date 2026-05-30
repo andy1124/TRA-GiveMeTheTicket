@@ -8,7 +8,15 @@
       "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Select-Object -First 30 | ForEach-Object { $_.Name })",
       "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Where-Object { $_.Name -match \"[A-Z]\" } | Select-Object -First 5 | ForEach-Object { $_.FullName })",
       "PowerShell(& \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\venv\\\\Scripts\\\\python.exe\" -c \"import ddddocr; print\\('ddddocr ok'\\); import tkinter; print\\('tkinter ok'\\)\")",
-      "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Where-Object { $_.Name -cmatch \"[A-Z]\" } | Measure-Object | Select-Object Count)"
+      "PowerShell(Get-ChildItem \"D:\\\\SideProject\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\labeled\" | Where-Object { $_.Name -cmatch \"[A-Z]\" } | Measure-Object | Select-Object Count)",
+      "Bash(Get-ChildItem -Path \"D:\\\\TRA-GiveMeTheTicket\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "PowerShell(& \"D:\\\\TRA-GiveMeTheTicket\\\\venv\\\\Scripts\\\\python.exe\" \"D:\\\\TRA-GiveMeTheTicket\\\\generate_captcha.py\" --count 50000 --out-dir \"D:\\\\TRA-GiveMeTheTicket\\\\captcha_dataset\\\\synthetic\")",
+      "PowerShell(nvidia-smi *)",
+      "Bash(python -c \"from booker import BookingConfig, _get_crnn, _ocr_with_crnn; print\\('booker OK'\\); cfg = BookingConfig.__dataclass_fields__; print\\('captcha_engine default:', cfg['captcha_engine'].default\\)\")",
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"from booker import BookingConfig, _get_crnn, _ocr_with_crnn; print\\('booker OK'\\); cfg = BookingConfig.__dataclass_fields__; print\\('captcha_engine default:', cfg['captcha_engine'].default\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('booker.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('booker.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
     ]
   }
 }

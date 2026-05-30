@@ -87,8 +87,10 @@ class BookingConfig:
     chrome_profile_path: str = ""    # empty = use default .chrome_profile/
     kill_chrome_on_start: bool = True
     # ── 驗證碼蒐集模式 ──────────────────────────────────────────────
-    collect_captcha: bool = False          # True = 每次 ddddocr 預測後存圖
+    collect_captcha: bool = False          # True = 每次 OCR 預測後存圖
     captcha_dataset_dir: str = "captcha_dataset"  # 蒐集根目錄（相對於專案根目錄）
+    # ── 驗證碼辨識引擎 ──────────────────────────────────────────────
+    captcha_engine: str = "crnn"           # "crnn"（自訓練模型）或 "ddddocr"
     # ── 多工搶票 ────────────────────────────────────────────────────
     label: str = ""              # 自訂名稱（選填，顯示用，如 "爸爸-0622太魯閣"）
     on_job_exhaust: str = "skip" # skip | stop（耗盡 max_retries 仍失敗時的行為）
@@ -212,7 +214,7 @@ def _save_captcha_sample(result: str, cfg: "BookingConfig") -> None:
     predicted: str   = attempt.get("predicted", "")
     is_auto: bool    = attempt.get("is_auto", False)
 
-    # 只蒐集 ddddocr 自動預測（手動輸入答案的不算，因為 label 是人打的不是 OCR）
+    # 只蒐集 OCR 自動預測（手動輸入答案的不算，因為 label 是人打的不是 OCR）
     if not is_auto or not img_bytes or not predicted:
         _last_captcha_attempt.clear()
         return
@@ -247,7 +249,7 @@ def _save_captcha_sample(result: str, cfg: "BookingConfig") -> None:
     _last_captcha_attempt.clear()
 
 
-# ── ddddocr singleton（懶載入，避免每次重試都重新載入模型）──────────
+# ── ddddocr singleton（懶載入）────────────────────────────────────────
 _ocr_instance = None
 
 def _get_ocr():
@@ -256,10 +258,62 @@ def _get_ocr():
         try:
             import ddddocr
             _ocr_instance = ddddocr.DdddOcr(show_ad=False)
-            logger.info("ddddocr loaded")
-        except ImportError:
-            logger.warning("ddddocr not installed — captcha will require manual input")
+            logger.info("[captcha] ddddocr 已載入")
+        except Exception:
+            logger.warning("[captcha] ddddocr 不可用，請改用 captcha_engine: crnn")
     return _ocr_instance
+
+
+# ── CRNN singleton（懶載入）────────────────────────────────────────────
+_crnn_instance = None
+
+def _get_crnn():
+    global _crnn_instance
+    if _crnn_instance is None:
+        model_path = Path(__file__).parent / "models" / "tra_captcha_crnn.pt"
+        if not model_path.exists():
+            logger.warning(f"[captcha] CRNN 模型不存在：{model_path}，請先執行 python train.py")
+            return None
+        try:
+            import torch
+            from captcha_model import CRNN
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _crnn_instance = CRNN.load(model_path, device=device)
+            # 首次 forward pass 觸發 cuDNN kernel 選擇（autotuning），在 preload 階段消化
+            with torch.no_grad():
+                dummy = torch.zeros(1, 3, 64, 200, device=device)
+                _crnn_instance(dummy)
+            logger.info(f"[captcha] CRNN 模型已載入並暖機完成（{device.upper()}）")
+        except Exception as e:
+            logger.warning(f"[captcha] CRNN 載入失敗：{e}")
+    return _crnn_instance
+
+
+def _ocr_with_crnn(img_bytes: bytes) -> str:
+    """使用自訓練 CRNN 模型辨識驗證碼，回傳辨識結果（失敗時回傳空字串）。"""
+    model = _get_crnn()
+    if model is None:
+        return ""
+    try:
+        import torch
+        import torchvision.transforms as T
+        from PIL import Image
+        from io import BytesIO
+        from captcha_model import ctc_greedy_decode
+
+        transform = T.Compose([
+            T.Resize((64, 200)),
+            T.ToTensor(),
+            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ])
+        img = Image.open(BytesIO(img_bytes)).convert("RGB")
+        x = transform(img).unsqueeze(0).to(next(model.parameters()).device)
+        with torch.no_grad():
+            log_probs = model(x)
+        return ctc_greedy_decode(log_probs)[0]
+    except Exception as e:
+        logger.warning(f"  [captcha] CRNN 推論失敗：{e}")
+        return ""
 
 
 # 嘗試多個 selector 截取驗證碼圖片
@@ -359,9 +413,11 @@ def _is_valid_captcha(text: str) -> bool:
 
 async def _handle_captcha(page: Page, cfg: "BookingConfig | None" = None, force: bool = False) -> None:
     """
-    自動辨識驗證碼（ddddocr），失敗則退回手動輸入。
+    自動辨識驗證碼，失敗則退回手動輸入。
     force=True：即使欄位已有值也重新辨識（驗證碼錯誤後使用）。
-    cfg：傳入可啟用蒐集模式，ddddocr 結果不合規則時也會存入 errors/。
+    cfg.captcha_engine 控制引擎：
+      "crnn"    → 使用自訓練 CRNN 模型（預設）
+      "ddddocr" → 使用 ddddocr
     """
     captcha_input = page.locator("#verifyCode")
     try:
@@ -378,16 +434,15 @@ async def _handle_captcha(page: Page, cfg: "BookingConfig | None" = None, force:
         val = await captcha_input.input_value()
         if val:
             logger.debug(f"  [captcha] 已有值 {val!r}，跳過")
-            return  # 已填且非強制，跳過
+            return
 
-    # 重新整理驗證碼圖片（force 模式 = 上次答錯，需要新圖）
     if force:
         logger.info("  [captcha] 強制刷新驗證碼圖片...")
         await _refresh_captcha_image(page)
 
-    # ddddocr 截圖 + 辨識，結果不合規則或截圖失敗時最多重試 15 次
+    engine = (cfg.captcha_engine if cfg else "crnn") or "crnn"
     OCR_RETRIES = 15
-    ocr = _get_ocr()
+
     for ocr_attempt in range(1, OCR_RETRIES + 1):
         img_bytes = await _screenshot_captcha_image(page)
         if not img_bytes:
@@ -396,52 +451,67 @@ async def _handle_captcha(page: Page, cfg: "BookingConfig | None" = None, force:
             await _refresh_captcha_image(page)
             continue
 
-        logger.info(f"  [captcha] 截圖成功 ({len(img_bytes)} bytes)，送入 ddddocr... (attempt {ocr_attempt}/{OCR_RETRIES})")
-        if ocr is not None:
-            try:
-                result = ocr.classification(img_bytes).strip()
-                logger.info(f"  [captcha] ddddocr 結果: {result!r}")
-                if _is_valid_captcha(result):
-                    await captcha_input.fill("")
-                    await captcha_input.fill(result)
-                    logger.info(f"  [captcha] 自動填入: {result}")
-                    # 記錄此次截圖與預測，供送出後 _save_captcha_sample 分類存檔
-                    _last_captcha_attempt.clear()
-                    _last_captcha_attempt["img_bytes"] = img_bytes
-                    _last_captcha_attempt["predicted"] = result
-                    _last_captcha_attempt["is_auto"] = True
-                    return
-                else:
-                    reason = "空字串" if not result else (
-                        f"長度 {len(result)} 不等於 6" if not (len(result) == 6) else
-                        "含非英數字元"
-                    )
-                    logger.warning(
-                        f"  [captcha] 結果 {result!r} 不合規則（{reason}）"
-                        f"（attempt {ocr_attempt}/{OCR_RETRIES}），刷新圖片重試..."
-                    )
-                    # 格式不合規則 = ddddocr 預測失敗，直接存入 errors/（不需等伺服器驗證）
-                    if cfg and cfg.collect_captcha and img_bytes and result:
-                        ts = int(time.time())
-                        save_dir = Path(__file__).parent / cfg.captcha_dataset_dir / "errors"
-                        save_dir.mkdir(parents=True, exist_ok=True)
-                        filename = f"{ts}_{_safe_filename(result)}.png"
-                        (save_dir / filename).write_bytes(img_bytes)
-                        _collect_stats["errors"] += 1
-                        logger.info(
-                            f"  [collect] errors     ← {filename}  (invalid format: {reason})"
-                            f"  (total labeled={_collect_stats['labeled']} "
-                            f"errors={_collect_stats['errors']} "
-                            f"uncertain={_collect_stats['uncertain']})"
-                        )
-                    await _refresh_captcha_image(page)
-                    await asyncio.sleep(0.6)
-            except Exception as e:
-                logger.warning(f"  [captcha] ddddocr error: {e}")
-                break  # 辨識異常不重試，直接退到手動
+        logger.info(
+            f"  [captcha] 截圖成功 ({len(img_bytes)} bytes)，"
+            f"送入 {engine}... (attempt {ocr_attempt}/{OCR_RETRIES})"
+        )
+
+        # ── OCR 推論 ──────────────────────────────────────────────────
+        ocr_result = ""
+        try:
+            if engine == "crnn":
+                ocr_result = _ocr_with_crnn(img_bytes)
+                if not ocr_result and ocr_attempt == 1:
+                    logger.warning("  [captcha] CRNN 不可用，退回手動輸入")
+                    break
+            else:  # ddddocr
+                ocr = _get_ocr()
+                if ocr is None:
+                    logger.warning("  [captcha] ddddocr 不可用，退回手動輸入")
+                    break
+                ocr_result = ocr.classification(img_bytes).strip()
+        except Exception as e:
+            logger.warning(f"  [captcha] {engine} 推論異常：{e}")
+            break
+
+        logger.info(f"  [captcha] {engine} 結果: {ocr_result!r}")
+
+        # ── 驗證結果 ──────────────────────────────────────────────────
+        if _is_valid_captcha(ocr_result):
+            await captcha_input.fill("")
+            await captcha_input.fill(ocr_result)
+            logger.info(f"  [captcha] 自動填入: {ocr_result}")
+            _last_captcha_attempt.clear()
+            _last_captcha_attempt["img_bytes"] = img_bytes
+            _last_captcha_attempt["predicted"] = ocr_result
+            _last_captcha_attempt["is_auto"] = True
+            return
+
+        reason = "空字串" if not ocr_result else (
+            f"長度 {len(ocr_result)} 不等於 6" if len(ocr_result) != 6 else
+            "含非英數字元"
+        )
+        logger.warning(
+            f"  [captcha] 結果 {ocr_result!r} 不合規則（{reason}）"
+            f"（attempt {ocr_attempt}/{OCR_RETRIES}），刷新圖片重試..."
+        )
+        if cfg and cfg.collect_captcha and img_bytes and ocr_result:
+            ts = int(time.time())
+            save_dir = Path(__file__).parent / cfg.captcha_dataset_dir / "errors"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{ts}_{_safe_filename(ocr_result)}.png"
+            (save_dir / filename).write_bytes(img_bytes)
+            _collect_stats["errors"] += 1
+            logger.info(
+                f"  [collect] errors     ← {filename}  (invalid format: {reason})"
+                f"  (total labeled={_collect_stats['labeled']} "
+                f"errors={_collect_stats['errors']} "
+                f"uncertain={_collect_stats['uncertain']})"
+            )
+        await _refresh_captcha_image(page)
+        await asyncio.sleep(0.6)
 
     logger.warning("  [captcha] OCR 重試耗盡，退回手動輸入")
-    # 退回手動輸入
     logger.warning("CAPTCHA detected! Look at the browser and enter the code:")
     captcha_text = input("   captcha -> ").strip()
     await captcha_input.fill(captcha_text)
@@ -656,7 +726,8 @@ async def select_first_train_and_next(page: Page, cfg: "BookingConfig | None" = 
     # 2026-05 新版：驗證碼出現在選車後、下一步前；驗證失敗時在此頁面重試。
     for cap_attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
         # 第二次起：驗證碼答錯後，radio 選擇可能被清空，需要重新點選
-        force_refresh = cap_attempt > 1
+        # force_refresh = cap_attempt > 1
+        force_refresh = cap_attempt > 0
         if force_refresh:
             logger.info("  [train list] 重試前重新確認班次 radio 選擇...")
             await _ensure_radio_selected()
@@ -818,6 +889,12 @@ def _kill_chrome() -> None:
 
 
 async def run_booking(cfg: BookingConfig) -> bool:
+    # 預載 OCR 模型，避免第一次遇到驗證碼時卡頓
+    if (cfg.captcha_engine or "crnn") == "crnn":
+        _get_crnn()
+    else:
+        _get_ocr()
+
     if cfg.chrome_profile_path:
         profile_path = cfg.chrome_profile_path
         logger.info(f"Using custom Chrome profile: {profile_path}")
@@ -1094,6 +1171,13 @@ async def run_booking_multi(
     """
     if not configs:
         return []
+
+    # 預載 OCR 模型（在瀏覽器開啟前，避免第一次遇到驗證碼時卡頓）
+    engine = configs[0].captcha_engine or "crnn"
+    if engine == "crnn":
+        _get_crnn()
+    else:
+        _get_ocr()
 
     first = configs[0]
     if first.chrome_profile_path:

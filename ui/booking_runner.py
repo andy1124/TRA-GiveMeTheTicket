@@ -203,6 +203,7 @@ def load_jobs_from_yaml() -> list[BookingConfig]:
         collect_captcha      = bool(a.get("collect_captcha", False)),
         captcha_dataset_dir  = str(a.get("captcha_dataset_dir", "captcha_dataset")),
         on_job_exhaust       = str(a.get("on_job_exhaust", "skip")),
+        captcha_engine       = str(a.get("captcha_engine", "crnn")),
     )
 
     def _make(b: dict) -> BookingConfig:
