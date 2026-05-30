@@ -16,7 +16,11 @@
       "Bash(python -c \"from booker import BookingConfig, _get_crnn, _ocr_with_crnn; print\\('booker OK'\\); cfg = BookingConfig.__dataclass_fields__; print\\('captcha_engine default:', cfg['captcha_engine'].default\\)\")",
       "Bash(venv\\\\Scripts\\\\python.exe -c \"from booker import BookingConfig, _get_crnn, _ocr_with_crnn; print\\('booker OK'\\); cfg = BookingConfig.__dataclass_fields__; print\\('captcha_engine default:', cfg['captcha_engine'].default\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('booker.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('booker.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('booker.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(Get-ChildItem -Path \"D:\\\\TRA-GiveMeTheTicket\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(grep -E \"^[^/]*\\(/[^/]*\\){0,3}$\")"
     ]
   }
 }
